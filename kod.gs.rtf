@@ -1,0 +1,647 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2761
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fnil\fcharset0 HelveticaNeue;\f1\fnil\fcharset0 STIXTwoMath-Regular;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab560
+\pard\pardeftab560\slleading20\partightenfactor0
+
+\f0\fs26 \cf0 \uc0\u8232 \u8232 \u8232 \u8232 // Funktion: Skicka ut initiala vikarief\'f6rfr\'e5gningar\
+function sendRequests() \{\
+  createTriggersIfMissing();\
+\
+  const ss = SpreadsheetApp.getActiveSpreadsheet();\
+  const projektSheet = ss.getSheetByName("ProjektInfo");\
+  const behovSheet = ss.getSheetByName("Behov");\
+  const configSheet = ss.getSheetByName("Konfiguration");\
+  const loggSheet = ss.getSheetByName("Logg");\
+  const svarSheet = ss.getSheetByName("Svarshantering");\
+\
+  if (getKonfigVarde(configSheet, "System_Paus") === "JA") \{\
+    Logger.log("
+\f1 \AppleTypeServices\AppleTypeServicesF2293774 \uc0\u9208 
+\f0 \AppleTypeServices  Systemet \'e4r pausat \'96 sendRequests() avbr\'f6ts.");\
+    return;\
+  \}\
+\
+  const behovData = behovSheet.getDataRange().getValues();\
+  const projektData = projektSheet.getDataRange().getValues();\
+  const mall = getKonfigVarde(configSheet, "Mall_F\'f6rfr\'e5gan");\
+\
+  const bilagaSuffix = (projektId, projektnamn) => \{\
+    const bilagor = getDriveFilesForProject(projektId, projektnamn);\
+    return bilagor.length > 0 ? "\\n\\nBilagor:\\n" + bilagor.join("\\n") : "";\
+  \};\
+\
+  for (let i = 1; i < behovData.length; i++) \{\
+    const [projektID, instrument, antal, parallellt, ftKvarn, maxFTK] = behovData[i];\
+    const instrumentSheet = ss.getSheetByName("Instrument_" + instrument);\
+    if (!instrumentSheet) continue;\
+\
+    const projektRad = projektData.find(row => row[0] === projektID);\
+    const projektnamn = projektRad ? projektRad[1] : projektID;\
+    const repdagar = projektRad ? projektRad[3].toString() : "";\
+    const konsertdagar = projektRad ? projektRad[4].toString() : "";\
+\
+    const musikerData = instrumentSheet.getDataRange().getValues();\
+    let skickade = 0;\
+\
+    for (let j = 1; j < musikerData.length && skickade < antal; j++) \{\
+      const [rank, f\'f6rnamn, efternamn, epost, telefon] = musikerData[j];\
+\
+      const existerar = svarSheet.getDataRange().getValues().some(rad =>\
+        rad[0] === projektID && rad[1] === instrument && rad[2] === epost\
+      );\
+      if (existerar) continue;\
+\
+      const svarslank =\
+        "https://docs.google.com/forms/d/e/1FAIpQLSdu8GzSOi_LTvuuD4Tf1sjtCI9a7H94ifW4HZGs-NzlYADjew/viewform" +\
+        "?entry.1870059153=" + encodeURIComponent(projektID) +\
+        "&entry.1023385850=" + encodeURIComponent(instrument) +\
+        "&entry.2039768626=" + encodeURIComponent(epost);\
+\
+      const meddelande = mall\
+        .replace("\{\{namn\}\}", f\'f6rnamn + " " + efternamn)\
+        .replace("\{\{instrument\}\}", instrument)\
+        .replace("\{\{projekt\}\}", projektnamn)\
+        .replace("\{\{repdagar\}\}", repdagar)\
+        .replace("\{\{konsertdagar\}\}", konsertdagar)\
+        .replace("\{\{svarsl\'e4nk\}\}", svarslank)\
+        + bilagaSuffix(projektID, projektnamn);\
+\
+      GmailApp.sendEmail(\
+        epost,\
+        "Vikarief\'f6rfr\'e5gan: " + projektnamn,\
+        "Se HTML-version i ditt e-postprogram.",\
+        \{ htmlBody: meddelande \}\
+      );\
+\
+      loggSheet.appendRow([new Date(), `F\'f6rfr\'e5gan skickad till $\{f\'f6rnamn\} $\{efternamn\} ($\{instrument\})`]);\
+\
+      svarSheet.appendRow([\
+        projektID,\
+        instrument,\
+        epost,\
+        "v\'e4ntar",\
+        new Date(),\
+        projektnamn,\
+        "", // P\'e5minnelse skickad\
+        ""  // Tack skickad\
+      ]);\
+\
+      skickade++;\
+    \}\
+  \}\
+\}\
+\
+\
+\
+function checkReminders() \{\
+  const ss = SpreadsheetApp.openById("1f7-Hp5PgL-yu7o1B1pU3FwTzk7_afeaqofQ8rc5Ov_s");\
+  const svarSheet = ss.getSheetByName("Svarshantering");\
+  const projektSheet = ss.getSheetByName("ProjektInfo");\
+  const configSheet = ss.getSheetByName("Konfiguration");\
+  const loggSheet = ss.getSheetByName("Logg");\
+\
+  if (getKonfigVarde(configSheet, "System_Paus") === "JA") \{\
+    Logger.log("
+\f1 \AppleTypeServices\AppleTypeServicesF2293774 \uc0\u9208 
+\f0 \AppleTypeServices  Systemet \'e4r pausat \'96 checkReminders() avbr\'f6ts.");\
+    return;\
+  \}\
+\
+  const svarData = svarSheet.getDataRange().getValues();\
+  const projektData = projektSheet.getDataRange().getValues();\
+  const mall = getKonfigVarde(configSheet, "Mall_P\'e5minnelse");\
+  const procentRaw = getKonfigVarde(configSheet, "P\'e5minnelse_efter_procent");\
+  const p\'e5minnelseProcent = Number(procentRaw || 75);\
+\
+  for (let i = 1; i < svarData.length; i++) \{\
+    const [projektID, instrument, epost, svarstatus, skickadTid, projektnamn, p\'e5minnelseSkickad] = svarData[i];\
+\
+    if (svarstatus !== "v\'e4ntar") continue;\
+    if (p\'e5minnelseSkickad) continue;\
+\
+    const projektRad = projektData.find(row => row[0] === projektID);\
+    if (!projektRad) continue;\
+    const tidsfrist = Number(projektRad[5]);\
+    if (!tidsfrist || isNaN(tidsfrist)) continue;\
+\
+    const maxMs = tidsfrist * 60 * 60 * 1000;\
+    const p\'e5minnelseTr\'f6skel = maxMs * (p\'e5minnelseProcent / 100);\
+    const tidSedan = new Date() - new Date(skickadTid);\
+\
+    if (tidSedan >= p\'e5minnelseTr\'f6skel && tidSedan < maxMs) \{\
+      const namn = epost.split("@")[0];\
+      const meddelande = mall\
+        .replace("\{\{namn\}\}", namn)\
+        .replace("\{\{instrument\}\}", instrument)\
+        .replace("\{\{projekt\}\}", projektID);\
+\
+      GmailApp.sendEmail(\
+        epost,\
+        "P\'e5minnelse: Vikarief\'f6rfr\'e5gan " + projektID,\
+        "Se HTML-version.",\
+        \{ htmlBody: meddelande \}\
+      );\
+\
+      svarSheet.getRange(i + 1, 7).setValue(new Date()); // Kolumn G\
+      loggSheet.appendRow([new Date(), `P\'e5minnelse skickad till $\{epost\} ($\{instrument\} i $\{projektID\})`]);\
+    \}\
+  \}\
+\}\
+\
+\
+\
+function checkProjectCompletion() \{\
+  const ss = SpreadsheetApp.openById("1f7-Hp5PgL-yu7o1B1pU3FwTzk7_afeaqofQ8rc5Ov_s");\
+  const behovSheet = ss.getSheetByName("Behov");\
+  const svarSheet = ss.getSheetByName("Svarshantering");\
+  const statusSheet = ss.getSheetByName("ProjektStatus");\
+  const configSheet = ss.getSheetByName("Konfiguration");\
+  const loggSheet = ss.getSheetByName("Logg");\
+\
+  if (getKonfigVarde(configSheet, "System_Paus") === "JA") \{\
+    Logger.log("
+\f1 \AppleTypeServices\AppleTypeServicesF2293774 \uc0\u9208 
+\f0 \AppleTypeServices  Systemet \'e4r pausat \'96 checkProjectCompletion() avbr\'f6ts.");\
+    return;\
+  \}\
+\
+  const adminEmail = getKonfigVarde(configSheet, "Admin_Email");\
+  const mall = getKonfigVarde(configSheet, "Mall_Admin_Rapport");\
+  const behovData = behovSheet.getDataRange().getValues();\
+  const svarData = svarSheet.getDataRange().getValues();\
+  const statusData = statusSheet.getDataRange().getValues();\
+\
+  const projektMap = \{\};\
+  behovData.slice(1).forEach(([projektID, instrument, behov]) => \{\
+    if (!projektMap[projektID]) projektMap[projektID] = [];\
+    projektMap[projektID].push(\{ instrument, behov: Number(behov) \});\
+  \});\
+\
+  let allaProjektUppfyllda = true;\
+\
+  Object.entries(projektMap).forEach(([projektID, behovList]) => \{\
+    const redanRapporterat = statusData.some(row => row[0] === projektID && row[1] === "OK");\
+    if (redanRapporterat) return;\
+\
+    let allaUppfyllda = true;\
+    let jaSvar = [];\
+\
+    behovList.forEach((\{ instrument, behov \}) => \{\
+      const antJa = svarData.filter(r => r[0] === projektID && r[1] === instrument && r[3] === "ja").length;\
+      if (antJa < behov) \{\
+        allaUppfyllda = false;\
+      \} else \{\
+        jaSvar.push(...svarData.filter(r => r[0] === projektID && r[1] === instrument && r[3] === "ja"));\
+      \}\
+    \});\
+\
+    if (allaUppfyllda && jaSvar.length) \{\
+      const lista = jaSvar.map(r => `\'95 $\{r[1]\} \'96 $\{r[2]\}`).join("\\n");\
+      const meddelande = mall\
+        .replace("\{\{projekt\}\}", projektID)\
+        .replace("\{\{lista\}\}", lista);\
+\
+      GmailApp.sendEmail(\
+        adminEmail,\
+        "Projektet " + projektID + " har fyllts",\
+        "Se HTML-version",\
+        \{ htmlBody: meddelande \}\
+      );\
+\
+      statusSheet.appendRow([projektID, "OK"]);\
+      loggSheet.appendRow([new Date(), `Adminrapport skickad f\'f6r projekt $\{projektID\}`]);\
+    \} else \{\
+      allaProjektUppfyllda = false;\
+    \}\
+  \});\
+\
+  if (allaProjektUppfyllda) \{\
+    const functionsToRemove = ["checkReminders", "checkDeadlines", "checkProjectCompletion"];\
+    ScriptApp.getProjectTriggers().forEach(trigger => \{\
+      if (functionsToRemove.includes(trigger.getHandlerFunction())) \{\
+        ScriptApp.deleteTrigger(trigger);\
+        Logger.log("Rensade trigger: " + trigger.getHandlerFunction());\
+        loggSheet.appendRow([new Date(), `Trigger rensad: $\{trigger.getHandlerFunction()\}`]);\
+      \}\
+    \});\
+  \}\
+\}\
+\
+// Hj\'e4lp: h\'e4mta ett v\'e4rde fr\'e5n konfigurationsfliken\
+function getKonfigVarde(sheet, nyckel) \{\
+  const data = sheet.getDataRange().getValues();\
+  for (let i = 1; i < data.length; i++) \{\
+    if (data[i][0] === nyckel) return data[i][1];\
+  \}\
+  return "";\
+\}\
+function checkDeadlines() \{\
+  const ss = SpreadsheetApp.openById("1f7-Hp5PgL-yu7o1B1pU3FwTzk7_afeaqofQ8rc5Ov_s");\
+  const svarSheet = ss.getSheetByName("Svarshantering");\
+  const projektSheet = ss.getSheetByName("ProjektInfo");\
+  const configSheet = ss.getSheetByName("Konfiguration");\
+  const behovSheet = ss.getSheetByName("Behov");\
+  const loggSheet = ss.getSheetByName("Logg");\
+\
+  if (getKonfigVarde(configSheet, "System_Paus") === "JA") \{\
+    Logger.log("
+\f1 \AppleTypeServices\AppleTypeServicesF2293774 \uc0\u9208 
+\f0 \AppleTypeServices  Systemet \'e4r pausat \'96 checkDeadlines() avbr\'f6ts.");\
+    return;\
+  \}\
+\
+  const svarData = svarSheet.getDataRange().getValues();\
+  const projektData = projektSheet.getDataRange().getValues();\
+  const behovData = behovSheet.getDataRange().getValues();\
+  const mall = getKonfigVarde(configSheet, "Mall_Tidsgr\'e4ns_l\'f6pt_ut");\
+\
+  for (let i = 1; i < svarData.length; i++) \{\
+    const [projektID, instrument, epost, svarstatus, skickadTid] = svarData[i];\
+    if (svarstatus !== "v\'e4ntar") continue;\
+\
+    const projektRad = projektData.find(row => row[0] === projektID);\
+    if (!projektRad) continue;\
+    const tidsfrist = Number(projektRad[5]);\
+    if (!tidsfrist || isNaN(tidsfrist)) continue;\
+\
+    const maxMs = tidsfrist * 60 * 60 * 1000;\
+    const tidSedan = new Date() - new Date(skickadTid);\
+\
+    if (tidSedan >= maxMs) \{\
+      const namn = epost.split("@")[0];\
+      const meddelande = mall\
+        .replace("\{\{namn\}\}", namn)\
+        .replace("\{\{instrument\}\}", instrument)\
+        .replace("\{\{projekt\}\}", projektID);\
+\
+      GmailApp.sendEmail(\
+        epost,\
+        "Tidsgr\'e4ns f\'f6r svar har l\'f6pt ut - " + projektID,\
+        "Se HTML-version.",\
+        \{ htmlBody: meddelande \}\
+      );\
+\
+      loggSheet.appendRow([new Date(), `Tidsgr\'e4ns l\'f6pt ut f\'f6r $\{epost\} ($\{instrument\} i $\{projektID\})`] );\
+      svarSheet.getRange(i + 1, 4).setValue("timeout");\
+      svarSheet.getRange(i + 1, 5).setValue(new Date());\
+\
+      const behovRad = behovData.find(row => row[0] === projektID && row[1] === instrument);\
+      if (!behovRad) continue;\
+      const instrumentSheet = ss.getSheetByName("Instrument_" + instrument);\
+      if (!instrumentSheet) continue;\
+\
+      const musikerData = instrumentSheet.getDataRange().getValues();\
+      const uppdatSvarData = svarSheet.getDataRange().getValues();\
+      const redanTillfr\'e5gade = uppdatSvarData\
+        .filter(row => row[0] === projektID && row[1] === instrument)\
+        .map(row => row[2]);\
+\
+      for (let j = 1; j < musikerData.length; j++) \{\
+        const [rank, f\'f6rnamn, efternamn, nyEpost, telefon] = musikerData[j];\
+        if (!redanTillfr\'e5gade.includes(nyEpost)) \{\
+          const mall = getKonfigVarde(configSheet, "Mall_F\'f6rfr\'e5gan");\
+          const svarslank =\
+            "https://docs.google.com/forms/d/e/1FAIpQLSdu8GzSOi_LTvuuD4Tf1sjtCI9a7H94ifW4HZGs-NzlYADjew/viewform" +\
+            "?entry.1870059153=" + encodeURIComponent(projektID) +\
+            "&entry.1023385850=" + encodeURIComponent(instrument) +\
+            "&entry.2039768626=" + encodeURIComponent(nyEpost);\
+\
+          const meddelande = mall\
+            .replace("\{\{namn\}\}", f\'f6rnamn + " " + efternamn)\
+            .replace("\{\{instrument\}\}", instrument)\
+            .replace("\{\{projekt\}\}", projektID)\
+            .replace("\{\{repdagar\}\}", "")\
+            .replace("\{\{konsertdagar\}\}", "")\
+            .replace("\{\{svarsl\'e4nk\}\}", svarslank);\
+\
+          GmailApp.sendEmail(\
+            nyEpost,\
+            "Vikarief\'f6rfr\'e5gan: " + projektID,\
+            "Se HTML-version i ditt e-postprogram.",\
+            \{ htmlBody: meddelande \}\
+          );\
+\
+          loggSheet.appendRow([new Date(), `Ny f\'f6rfr\'e5gan skickad till $\{nyEpost\} efter timeout.`]);\
+\
+          svarSheet.appendRow([projektID, instrument, nyEpost, "v\'e4ntar", new Date()]);\
+          break;\
+        \}\
+      \}\
+    \}\
+  \}\
+\}\
+\
+// Automatisk dropdown f\'f6r ProjektID p\'e5 n\'e4sta tomma rad i 'Behov'\
+function updateProjektIdDropdown() \{\
+  const ss = SpreadsheetApp.getActiveSpreadsheet();\
+  const behovSheet = ss.getSheetByName("Behov");\
+  const projektSheet = ss.getSheetByName("ProjektInfo");\
+\
+  if (!behovSheet || !projektSheet) return;\
+\
+  const behovData = behovSheet.getRange("A2:A").getValues();\
+  const firstEmptyRow = behovData.findIndex(r => r[0] === "") + 2; // l\'e4gger till 2 pga rubriker\
+  if (firstEmptyRow < 2) return;\
+\
+  const projektIdRange = projektSheet.getRange("A2:A");\
+  const rule = SpreadsheetApp.newDataValidation()\
+    .requireValueInRange(projektIdRange, true)\
+    .setAllowInvalid(false)\
+    .build();\
+\
+  // Rensa tidigare dropdowns (valfritt)\
+  behovSheet.getRange("A2:A500").clearDataValidations();\
+\
+  // L\'e4gg in ny dropdown i f\'f6rsta tomma raden\
+  behovSheet.getRange(firstEmptyRow, 1).setDataValidation(rule);\
+\}\
+\
+\
+function onEdit(e) \{\
+  const sheet = e.range.getSheet();\
+  if (sheet.getName() !== "Behov") return;\
+\
+  const row = e.range.getRow();\
+  const col = e.range.getColumn();\
+\
+  // Om redigering sker i kolumn B\'96C (instrument/antal) utan ProjektID i kolumn A\
+  if (col >= 2 && col <= 3) \{\
+    const projektId = sheet.getRange(row, 1).getValue();\
+    if (!projektId) \{\
+      SpreadsheetApp.getUi().alert("\uc0\u9888 \u65039  Du m\'e5ste v\'e4lja ett ProjektID innan du fyller i instrument eller antal.");\
+    \}\
+  \}\
+\
+  // Automatisk dropdown + konfliktvarning\
+  if (col <= 5 && row >= 2) \{\
+    const parallelltCell = sheet.getRange(row, 4);\
+    const ftKvarnCell = sheet.getRange(row, 5);\
+\
+    const parallellt = parallelltCell.getValue();\
+    const ftKvarn = ftKvarnCell.getValue();\
+\
+    const rule = SpreadsheetApp.newDataValidation()\
+      .requireValueInList(["JA", "NEJ"], true)\
+      .setAllowInvalid(false)\
+      .build();\
+\
+    parallelltCell.setDataValidation(rule);\
+    ftKvarnCell.setDataValidation(rule);\
+\
+    // \uc0\u9888 \u65039  Konfliktvarning\
+    if (parallellt === "NEJ" && ftKvarn === "JA") \{\
+      SpreadsheetApp.getUi().alert("\uc0\u9888 \u65039  Kombinationen 'S\'e4nds parallellt = NEJ' och 'F\'f6rst till kvarn = JA' \'e4r ologisk. Vid f\'f6rst till kvarn skickas alltid f\'f6rfr\'e5gan till flera.");\
+    \}\
+  \}\
+\}\
+\
+\
+// L\'e4gg till menyval f\'f6r att manuellt uppdatera ProjektID-dropdown\
+function resetProject() \{\
+  const ui = SpreadsheetApp.getUi();\
+  const response = ui.prompt("Nollst\'e4ll projekt", "Ange ProjektID som ska nollst\'e4llas:", ui.ButtonSet.OK_CANCEL);\
+\
+  if (response.getSelectedButton() !== ui.Button.OK) return;\
+  const projektID = response.getResponseText().trim();\
+  if (!projektID) \{\
+    ui.alert("Inget ProjektID angavs.");\
+    return;\
+  \}\
+\
+  const ss = SpreadsheetApp.getActiveSpreadsheet();\
+  const svarSheet = ss.getSheetByName("Svarshantering");\
+  const statusSheet = ss.getSheetByName("ProjektStatus");\
+  const loggSheet = ss.getSheetByName("Logg");\
+  const behovSheet = ss.getSheetByName("Behov");\
+\
+  // Rensa svar\
+  const svarData = svarSheet.getDataRange().getValues();\
+  const svarRubrik = svarData[0];\
+  const nyaSvar = svarData.filter((row, i) => i === 0 || row[0] !== projektID);\
+  svarSheet.clearContents();\
+  svarSheet.getRange(1, 1, nyaSvar.length, svarRubrik.length).setValues(nyaSvar);\
+\
+  // Rensa status\
+  const statusData = statusSheet.getDataRange().getValues();\
+  const statusRubrik = statusData[0];\
+  const nyStatus = statusData.filter((row, i) => i === 0 || row[0] !== projektID);\
+  statusSheet.clearContents();\
+  statusSheet.getRange(1, 1, nyStatus.length, statusRubrik.length).setValues(nyStatus);\
+\
+  // Rensa logg\
+  const loggData = loggSheet.getDataRange().getValues();\
+  const loggRubrik = loggData[0];\
+  const nyLogg = loggData.filter((row, i) => i === 0 || !String(row[1]).includes(projektID));\
+  loggSheet.clearContents();\
+  loggSheet.getRange(1, 1, nyLogg.length, loggRubrik.length).setValues(nyLogg);\
+\
+  // Rensa behov\
+  const behovData = behovSheet.getDataRange().getValues();\
+  const behovRubrik = behovData[0];\
+  const nyBehov = behovData.filter((row, i) => i === 0 || row[0] !== projektID);\
+  behovSheet.clearContents();\
+  behovSheet.getRange(1, 1, nyBehov.length, behovRubrik.length).setValues(nyBehov);\
+\
+  ui.alert("Projekt " + projektID + " har nollst\'e4llts fr\'e5n alla relevanta flikar.");\
+\}\
+function onOpen() \{\
+  SpreadsheetApp.getUi()\
+    .createMenu("Admin")\
+    .addItem("\uc0\u55357 \u56577  Nollst\'e4ll projekt", "resetProject")\
+    .addItem("\uc0\u55357 \u56637  Uppdatera ProjektID-dropdown", "updateProjektIdDropdown")\
+    .addItem("\uc0\u55357 \u56548  Skicka f\'f6rfr\'e5gningar", "sendRequests")\
+    .addItem("\uc0\u55357 \u56550  Arkivera projekt", "archiveProject")\
+    .addToUi();\
+\}\
+\
+\
+function handleFormResponse(e) \{\
+  if (!e || !e.namedValues) \{\
+    Logger.log("Funktionen k\'f6rdes utan giltigt eventobjekt (e)");\
+    return;\
+  \}\
+\
+  const ss = SpreadsheetApp.openById("1f7-Hp5PgL-yu7o1B1pU3FwTzk7_afeaqofQ8rc5Ov_s");\
+  const svarSheet = ss.getSheetByName("Svarshantering");\
+  const loggSheet = ss.getSheetByName("Logg");\
+  const behovSheet = ss.getSheetByName("Behov");\
+  const configSheet = ss.getSheetByName("Konfiguration");\
+  const projektSheet = ss.getSheetByName("ProjektInfo");\
+\
+  if (getKonfigVarde(configSheet, "System_Paus") === "JA") \{\
+    Logger.log("
+\f1 \AppleTypeServices\AppleTypeServicesF2293774 \uc0\u9208 
+\f0 \AppleTypeServices  Systemet \'e4r pausat \'96 handleFormResponse() avbr\'f6ts.");\
+    return;\
+  \}\
+\
+  const projektID = e.namedValues["ProjektID (automatisk - \'e4ndra ej)"]?.[0];\
+  const instrument = e.namedValues["Instrument (automatisk - \'e4ndra ej)"]?.[0];\
+  const epost = e.namedValues["E-post (automatisk - \'e4ndra ej)"]?.[0];\
+  const svar = e.namedValues["Svar"]?.[0]?.toLowerCase();\
+\
+  if (!projektID || !instrument || !epost || !svar) return;\
+\
+  const svarData = svarSheet.getDataRange().getValues();\
+  const behovData = behovSheet.getDataRange().getValues();\
+  const behovRad = behovData.find(row => row[0] === projektID && row[1] === instrument);\
+  if (!behovRad) return;\
+  const [_, __, behovAntal] = behovRad;\
+  const antal = Number(behovAntal);\
+\
+  for (let i = 1; i < svarData.length; i++) \{\
+    const rad = svarData[i];\
+    if (rad[0] === projektID && rad[1] === instrument && rad[2] === epost) \{\
+      svarSheet.getRange(i + 1, 4).setValue(svar);\
+      svarSheet.getRange(i + 1, 5).setValue(new Date());\
+      loggSheet.appendRow([new Date(), `Svar fr\'e5n $\{epost\}: $\{svar.toUpperCase()\} ($\{instrument\} i $\{projektID\})`] );\
+\
+      const projektRad = projektSheet.getDataRange().getValues().find(row => row[0] === projektID);\
+      const projektnamn = projektRad ? projektRad[1] : projektID;\
+      const bilagor = getDriveFilesForProject(projektID, projektnamn);\
+      const bilagaText = bilagor.length > 0 ? "\\n\\nBilagor:\\n" + bilagor.join("\\n") : "";\
+\
+      if (svar === "ja") \{\
+        const uppdatSvarData = svarSheet.getDataRange().getValues();\
+        const antJa = uppdatSvarData.filter(row => row[0] === projektID && row[1] === instrument && row[3] === "ja").length;\
+        const tackSkickad = rad[7]; // Kolumn H: Tack skickad\
+\
+        if (antJa >= antal && !tackSkickad) \{\
+          const mallTack = getKonfigVarde(configSheet, "Mall_Tack");\
+          const namn = epost.split("@")[0];\
+          const meddelande = mallTack\
+            .replace("\{\{namn\}\}", namn)\
+            .replace("\{\{instrument\}\}", instrument)\
+            .replace("\{\{projekt\}\}", projektID)\
+            + bilagaText;\
+\
+          GmailApp.sendEmail(\
+            epost,\
+            "Tack f\'f6r ditt svar - " + projektID,\
+            "Se HTML-version.",\
+            \{ htmlBody: meddelande \}\
+          );\
+\
+          svarSheet.getRange(i + 1, 8).setValue(new Date()); // Kolumn H\
+          loggSheet.appendRow([new Date(), `Tackmejl skickat till $\{epost\}`]);\
+        \}\
+\
+      \} else if (svar === "nej") \{\
+        loggSheet.appendRow([new Date(), `NEJ-svar registrerat, letar ny musiker...`]);\
+        const instrumentSheet = ss.getSheetByName("Instrument_" + instrument);\
+        if (!instrumentSheet) \{\
+          loggSheet.appendRow([new Date(), `Ingen instrumentflik hittades: Instrument_$\{instrument\}`]);\
+          return;\
+        \}\
+\
+        const musikerData = instrumentSheet.getDataRange().getValues();\
+        const uppdatSvarData = svarSheet.getDataRange().getValues();\
+        const redanTillfr\'e5gade = uppdatSvarData\
+          .filter(row => row[0] === projektID && row[1] === instrument)\
+          .map(row => row[2]);\
+\
+        for (let j = 1; j < musikerData.length; j++) \{\
+          const [rank, f\'f6rnamn, efternamn, nyEpost, telefon] = musikerData[j];\
+          if (!redanTillfr\'e5gade.includes(nyEpost)) \{\
+            const mall = getKonfigVarde(configSheet, "Mall_F\'f6rfr\'e5gan");\
+            const svarslank =\
+              "https://docs.google.com/forms/d/e/1FAIpQLSdu8GzSOi_LTvuuD4Tf1sjtCI9a7H94ifW4HZGs-NzlYADjew/viewform" +\
+              "?entry.1870059153=" + encodeURIComponent(projektID) +\
+              "&entry.1023385850=" + encodeURIComponent(instrument) +\
+              "&entry.2039768626=" + encodeURIComponent(nyEpost);\
+\
+            const meddelande = mall\
+              .replace("\{\{namn\}\}", f\'f6rnamn + " " + efternamn)\
+              .replace("\{\{instrument\}\}", instrument)\
+              .replace("\{\{projekt\}\}", projektID)\
+              .replace("\{\{repdagar\}\}", "")\
+              .replace("\{\{konsertdagar\}\}", "")\
+              .replace("\{\{svarsl\'e4nk\}\}", svarslank);\
+\
+            GmailApp.sendEmail(\
+              nyEpost,\
+              "Vikarief\'f6rfr\'e5gan: " + projektID,\
+              "Se HTML-version i ditt e-postprogram.",\
+              \{ htmlBody: meddelande \}\
+            );\
+\
+            loggSheet.appendRow([new Date(), `Ny f\'f6rfr\'e5gan skickad till $\{nyEpost\}`]);\
+            svarSheet.appendRow([projektID, instrument, nyEpost, "v\'e4ntar", new Date(), projektnamn, "", ""]);\
+            break;\
+          \} else \{\
+            loggSheet.appendRow([new Date(), `Skippade $\{nyEpost\} \'96 redan tillfr\'e5gad.`]);\
+          \}\
+        \}\
+      \}\
+      break;\
+    \}\
+  \}\
+\}\
+\
+\
+\
+\
+function getKonfigVarde(sheet, nyckel) \{\
+  const data = sheet.getDataRange().getValues();\
+  for (let i = 1; i < data.length; i++) \{\
+    if (data[i][0] === nyckel) return data[i][1];\
+  \}\
+  return "";\
+\}\
+// Arkiverar ett slutf\'f6rt projekt fr\'e5n ProjektInfo, Behov och Svarshantering\
+function archiveProject() \{\
+  const ui = SpreadsheetApp.getUi();\
+  const response = ui.prompt("Arkivera projekt", "Ange ProjektID att arkivera:", ui.ButtonSet.OK_CANCEL);\
+  if (response.getSelectedButton() !== ui.Button.OK) return;\
+  const projektID = response.getResponseText().trim();\
+  if (!projektID) return;\
+\
+  const ss = SpreadsheetApp.getActiveSpreadsheet();\
+  const sheets = \{\
+    info: ss.getSheetByName("ProjektInfo"),\
+    behov: ss.getSheetByName("Behov"),\
+    svar: ss.getSheetByName("Svarshantering")\
+  \};\
+\
+  const archiveSheets = \{\
+    info: ss.getSheetByName("Arkiv_ProjektInfo") || ss.insertSheet("Arkiv_ProjektInfo"),\
+    behov: ss.getSheetByName("Arkiv_Behov") || ss.insertSheet("Arkiv_Behov"),\
+    svar: ss.getSheetByName("Arkiv_Svarshantering") || ss.insertSheet("Arkiv_Svarshantering")\
+  \};\
+\
+  Object.entries(sheets).forEach(([key, sheet]) => \{\
+    const data = sheet.getDataRange().getValues();\
+    const header = data[0];\
+    const filtered = data.filter((row, i) => i === 0 || row[0] === projektID);\
+    const remaining = data.filter((row, i) => i === 0 || row[0] !== projektID);\
+\
+    if (filtered.length > 1) \{\
+      const archive = archiveSheets[key];\
+      const archiveLastRow = archive.getLastRow();\
+      if (archiveLastRow === 0) \{\
+        archive.appendRow(header);\
+      \}\
+      archive.getRange(archive.getLastRow() + 1, 1, filtered.length - 1, header.length).setValues(filtered.slice(1));\
+      sheet.clearContents();\
+      sheet.getRange(1, 1, remaining.length, header.length).setValues(remaining);\
+    \}\
+  \});\
+\
+  ui.alert("Projekt " + projektID + " har arkiverats.");\
+\}\
+function createTriggersIfMissing() \{\
+  const requiredFunctions = ["checkReminders", "checkDeadlines", "checkProjectCompletion"];\
+  const existingTriggers = ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction());\
+\
+  requiredFunctions.forEach(fn => \{\
+    if (!existingTriggers.includes(fn)) \{\
+      ScriptApp.newTrigger(fn).timeBased().everyMinutes(10).create(); // eller everyHours(1)\
+      Logger.log(`Skapade trigger f\'f6r: $\{fn\}`);\
+    \}\
+  \});\
+\}\
+\
+}
