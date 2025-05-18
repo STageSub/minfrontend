@@ -1,0 +1,1278 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <!-- <base target="_top"> Netlify behöver inte denna, kan tas bort eller kommenteras ut -->
+    <title>StageSub Admin</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; display: flex; flex-direction: column; min-height: 100vh; }
+      header { background-color: #333; color: white; padding: 15px 20px; text-align: center; }
+      nav { background-color: #444; padding: 10px 0; text-align: center;}
+      nav a { color: white; padding: 10px 20px; text-decoration: none; display: inline-block; }
+      nav a:hover { background-color: #555; }
+      nav a.active { background-color: #007bff; }
+      #contentArea, #musiciansViewContainer { flex-grow: 1; }
+      footer { background-color: #f1f1f1; text-align: center; padding: 10px; font-size: 0.8em; }
+
+      table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+      th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+      th { background-color: #e9e9e9; }
+      button { padding: 8px 15px; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 4px; margin-right: 5px; margin-bottom: 5px;}
+      button:hover { background-color: #0056b3; }
+      .loading { display: none; margin-top: 10px; font-style: italic; }
+      .error { color: red; margin-top: 10px; font-weight: bold; }
+      .success { color: green; margin-top: 10px; font-weight: bold; }
+      .info { color: #0056b3; margin-top: 10px;}
+
+
+      .form-container { max-width: 600px; margin-top: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background-color: #f9f9f9;}
+      .form-container label, .details-view p > strong { display: block; margin-bottom: 5px; font-weight: bold; }
+      .form-container input[type="text"],
+      .form-container input[type="email"],
+      .form-container input[type="tel"],
+      .form-container input[type="number"],
+      .form-container textarea,
+      .form-container select {
+        width: 100%;
+        padding: 8px;
+        margin-bottom: 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        box-sizing: border-box;
+      }
+      .form-container textarea { resize: vertical; min-height: 80px; }
+      .form-buttons { margin-top: 15px; }
+
+      .details-view { padding: 15px; border: 1px solid #eee; border-radius: 5px; background-color: #fff; margin-top:20px;}
+      .details-view p { margin: 10px 0; line-height: 1.6; }
+      .details-view span { margin-left: 8px; font-weight:normal; }
+      .details-view pre { background-color: #f8f8f8; padding:10px; border-radius:3px; white-space: pre-wrap; word-wrap: break-word; }
+
+      .qualifications-section { margin-top: 15px; padding-top: 10px; border-top: 1px solid #eee; }
+      .qualification-row { display: flex; align-items: center; margin-bottom: 8px; }
+      .qualification-row select { margin-right: 8px; flex-grow: 1; }
+      .qualification-row button {
+        padding: 5px 10px;
+        background-color: #dc3545;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        line-height: 1.2;
+      }
+      .qualification-row button:hover { background-color: #c82333; }
+      .existing-qualifications-list { list-style-type: disc; margin-left: 20px; padding-left: 0;}
+      .existing-qualifications-list li { margin-bottom: 5px;}
+
+    </style>
+  </head>
+  <body>
+
+    <header>
+      <h1>StageSub Administration</h1>
+    </header>
+
+    <nav>
+      <a href="#" onclick="loadView('dashboard'); return false;" id="nav-dashboard" class="active">Dashboard</a>
+      <a href="#" onclick="loadView('projects'); return false;" id="nav-projects">Projekt</a>
+      <a href="#" onclick="loadView('musicians'); return false;" id="nav-musicians">Musiker</a>
+    </nav>
+
+    <main id="contentArea" style="padding: 20px; display: block;">
+      <p>Välkommen till StageSub! Välj en sektion från menyn ovan.</p>
+    </main>
+
+    <div id="musiciansViewContainer" style="display:none; padding: 20px;">
+        <!-- Innehåll för musikervyn (lista, skapa/redigera formulär) kommer här -->
+    </div>
+
+    <div id="loadingIndicator" class="loading">Laddar...</div>
+    <div id="messageArea" ></div>
+
+    <footer>
+      <p>© 2025 StageSub</p>
+    </footer>
+
+    <script>
+      console.log("index.html script block STARTED");
+
+      // Viktigt: Ersätt med din Apps Script Web App URL
+      const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyfKb_0dwpmcAuU5-UyxuODN7TqCvDori2QlZuwII-K5X65_Df7j151NASsuXv2y4kpyA/exec";
+
+      let currentView = 'dashboard';
+      let currentProjectID = null;
+      let currentNeedID = null;
+      let currentMusicianID = null;
+      let musicianQualificationRowCounter = 0;
+
+      // Helper function för att hantera fetch-anrop (både GET och POST)
+      async function callAppsScript(action, payload = null, method = 'GET') {
+        showLoading(true);
+        showMessage('');
+        let url = SCRIPT_URL;
+        const options = {
+          method: method,
+          headers: {},
+          //credentials: 'omit', // Kan behövas om du stöter på CORS-problem relaterade till credentials, men testa utan först
+          //mode: 'cors' // Sätts ofta automatiskt av fetch för cross-origin requests
+        };
+
+        if (method === 'GET') {
+          const params = new URLSearchParams({ action });
+          if (payload) { // payload används här för query parametrar i GET
+            for (const key in payload) {
+              if (payload.hasOwnProperty(key) && payload[key] !== null && typeof payload[key] !== 'undefined') {
+                 params.append(key, payload[key]);
+              }
+            }
+          }
+          url += `?${params.toString()}`;
+        } else if (method === 'POST') {
+          // Google Apps Script doPost förväntar sig 'text/plain' om du skickar en strängifierad JSON direkt
+          // eller om du skickar som 'application/x-www-form-urlencoded' (som vanliga formulär).
+          // Om din doPost specifikt parsar e.postData.contents som JSON, är 'text/plain' eller 'application/json' ok.
+          // För doPost-exemplet jag gav som använder JSON.parse(e.postData.contents), är 'text/plain' säkrast.
+          options.headers['Content-Type'] = 'text/plain;charset=utf-8'; // För JSON.parse(e.postData.contents)
+          options.body = JSON.stringify({ action, payload }); // Skicka action och payload i body
+        }
+
+        try {
+          console.log(`Calling Apps Script: ${method} ${url}`, method === 'POST' ? options.body : '');
+          const response = await fetch(url, options);
+          console.log(`Response status from Apps Script for action '${action}': ${response.status}`);
+
+          if (!response.ok) {
+            // Försök läsa felmeddelandet oavsett content type
+            let errorText = `HTTP error ${response.status} - ${response.statusText}`;
+            try {
+                const errorBodyText = await response.text(); // Läs som text först
+                console.log("Error body text:", errorBodyText);
+                if (errorBodyText) {
+                    try {
+                        const errorBodyJson = JSON.parse(errorBodyText); // Försök parsa som JSON
+                        if (errorBodyJson && errorBodyJson.error) {
+                            errorText = errorBodyJson.error;
+                        } else {
+                            errorText = errorBodyText; // Använd texten om det inte är JSON-felobjekt
+                        }
+                    } catch (parseError) {
+                        errorText = errorBodyText; // Om det inte är JSON, använd råtexten
+                    }
+                }
+            } catch (e) {
+                // Ignorera om body inte kan läsas
+            }
+            throw new Error(errorText);
+          }
+
+          const responseText = await response.text();
+          console.log(`Response text from Apps Script for action '${action}':`, responseText);
+          if (!responseText) {
+            // Om svaret är tomt, vilket kan hända om Apps Script returnerar t.ex. ContentService.createTextOutput() utan argument
+            console.warn(`Empty response from Apps Script for action '${action}'.`);
+            showLoading(false);
+            // Beroende på action, kan du vilja returnera en tom array/objekt eller kasta ett fel.
+            // För nu, låt oss se om det orsakar problem längre ner.
+            return (method === 'GET' && (action.toLowerCase().includes('list') || action.toLowerCase().includes('dropdown'))) ? [] : {};
+          }
+
+          const data = JSON.parse(responseText);
+          showLoading(false);
+          // Om Apps Script returnerar {success: false, error: "..."} från doPost
+          if (data && data.success === false && data.error) {
+            throw new Error(data.error);
+          }
+          // Om Apps Script returnerar {error: "..."} från doGet
+          if (data && data.error && typeof data.success === 'undefined') {
+             throw new Error(data.error);
+          }
+          return data;
+
+        } catch (error) {
+          console.error(`Error in callAppsScript for action '${action}':`, error);
+          onFailure(error);
+          showLoading(false);
+          throw error;
+        }
+      }
+
+
+      function showLoading(isLoading) {
+        const indicator = document.getElementById('loadingIndicator');
+        if (indicator) {
+            indicator.style.display = isLoading ? 'block' : 'none';
+        } else {
+            console.warn("showLoading: loadingIndicator not found");
+        }
+      }
+
+      function showMessage(message, type = 'error') {
+        const messageDiv = document.getElementById('messageArea');
+        if (messageDiv) {
+            messageDiv.textContent = message;
+            messageDiv.className = type;
+            messageDiv.style.display = message ? 'block' : 'none';
+        } else {
+            console.warn("showMessage: messageArea not found");
+        }
+      }
+
+      function setActiveNavLink(viewName) {
+        // console.log("setActiveNavLink called for:", viewName);
+        document.querySelectorAll('nav a').forEach(link => link.classList.remove('active'));
+        let mainView = viewName.split('/')[0];
+        const activeLink = document.getElementById(`nav-${mainView}`);
+        if (activeLink) {
+            activeLink.classList.add('active');
+        } else {
+            // console.warn("setActiveNavLink: Active link for mainView", mainView, "not found.");
+        }
+      }
+
+      async function loadView(viewName, param = null) { // Gjorde om denna till async för att kunna awaita vissa saker vid behov
+        console.log("loadView CALLED with viewName:", viewName, "and param:", param);
+        currentView = viewName;
+        setActiveNavLink(viewName);
+        // showLoading(true); // Tas bort här, sätts i början av callAppsScript
+        showMessage('');
+
+        const contentArea = document.getElementById('contentArea');
+        const musiciansContainer = document.getElementById('musiciansViewContainer');
+
+        if (!contentArea || !musiciansContainer) {
+            console.error("loadView: CRITICAL - contentArea or musiciansViewContainer element not found!");
+            showLoading(false);
+            return;
+        }
+
+        contentArea.style.display = 'none';
+        contentArea.innerHTML = '';
+        musiciansContainer.style.display = 'none';
+        musiciansContainer.innerHTML = '';
+
+        try {
+            if (viewName === 'dashboard') {
+              contentArea.style.display = 'block';
+              contentArea.innerHTML = '<h2>Dashboard</h2><p>Översikt kommer här...</p>';
+              showLoading(false); // Manuell hantering för vyer som inte gör API-anrop direkt
+            } else if (viewName === 'projects') {
+              currentProjectID = null;
+              currentNeedID = null;
+              currentMusicianID = null;
+              contentArea.style.display = 'block';
+              await loadProjectsView(); // Vänta tills vyn är laddad om den är async
+            } else if (viewName === 'createProjectForm') {
+              currentProjectID = null;
+              currentNeedID = null;
+              currentMusicianID = null;
+              contentArea.style.display = 'block';
+              loadCreateProjectForm(); // Denna sätter showLoading(false) internt
+            } else if (viewName === 'projectDetails') {
+              if (param) {
+                currentProjectID = param;
+                currentNeedID = null;
+                currentMusicianID = null;
+                contentArea.style.display = 'block';
+                await loadProjectDetailsView(param);
+              } else {
+                showMessage('Inget projekt-ID angivet för detaljvy.', 'error');
+                loadView('projects');
+              }
+            } else if (viewName === 'editProjectForm') {
+               if (param) {
+                currentProjectID = param;
+                currentNeedID = null;
+                currentMusicianID = null;
+                contentArea.style.display = 'block';
+                await loadEditProjectForm(param);
+              } else {
+                showMessage('Inget projekt-ID angivet för redigeringsvy.', 'error');
+                loadView('projects');
+              }
+            } else if (viewName === 'createNeedForm') {
+               if (param) {
+                currentProjectID = param;
+                currentNeedID = null;
+                currentMusicianID = null;
+                contentArea.style.display = 'block';
+                await loadCreateNeedForm(param); // async för att ladda dropdowns
+               } else {
+                showMessage('Inget projekt-ID angivet för att skapa behov.', 'error');
+                loadView('projects');
+                }
+            } else if (viewName === 'editNeedForm') {
+               if (param) {
+                currentNeedID = param;
+                currentMusicianID = null;
+                contentArea.style.display = 'block';
+                await loadEditNeedForm(param); // async för att ladda dropdowns och data
+               } else {
+                showMessage('Inget behovs-ID angivet för redigering.', 'error');
+                if(currentProjectID) loadView('projectDetails', currentProjectID); else loadView('projects');
+               }
+            }
+            else if (viewName === 'musicians') {
+              currentProjectID = null;
+              currentNeedID = null;
+              currentMusicianID = null;
+              musiciansContainer.style.display = 'block';
+              await loadMusiciansView();
+            } else if (viewName === 'createMusicianForm') {
+              currentProjectID = null;
+              currentNeedID = null;
+              currentMusicianID = null;
+              musiciansContainer.style.display = 'block';
+              await loadCreateMusicianForm(); // async för dropdowns
+            } else if (viewName === 'editMusicianForm') {
+              if (param) {
+                currentMusicianID = param;
+                musiciansContainer.style.display = 'block';
+                await loadEditMusicianForm(param); // async för dropdowns och data
+              } else {
+                showMessage('Inget musiker-ID angivet för redigering.', 'error');
+                loadView('musicians');
+              }
+            }
+            else {
+              contentArea.style.display = 'block';
+              contentArea.innerHTML = '<p>Okänd vy.</p>';
+              showLoading(false); // Manuell hantering
+            }
+        } catch (err) {
+            console.error("Error in loadView for viewName '" + viewName + "':", err);
+            showMessage("Ett internt fel uppstod vid laddning av vyn: " + (err.message || err), "error");
+            showLoading(false);
+        }
+      }
+
+      // --- PROJEKTVYER ---
+      async function loadProjectsView() { // Gjort async
+        console.log("loadProjectsView CALLED");
+        const contentArea = document.getElementById('contentArea');
+         if (!contentArea) { console.error("loadProjectsView: contentArea not found!"); showLoading(false); return; }
+        contentArea.innerHTML = `
+          <h2>Projekthantering</h2>
+          <button onclick="loadView('createProjectForm')">Skapa Nytt Projekt</button>
+          <button onclick="fetchProjectsData()">Ladda/Uppdatera Projektlista</button>
+          <div id="projectsTableContainer">Laddar projektlistan...</div>
+        `;
+        await fetchProjectsData(); // Vänta på data
+        // console.log("loadProjectsView FINISHED (HTML set, fetchProjectsData called)");
+      }
+
+      async function fetchProjectsData() {
+        console.log("fetchProjectsData CALLED");
+        const tableContainer = document.getElementById('projectsTableContainer');
+        if(tableContainer) {
+            tableContainer.innerHTML = 'Hämtar projektdata...';
+        } else {
+            console.error("fetchProjectsData: CRITICAL - projectsTableContainer not found!");
+            // showLoading(false); // Hanteras av callAppsScript eller onFailure
+            return;
+        }
+        try {
+            const projectsArray = await callAppsScript('getProjectsForList');
+            displayProjectsTable(projectsArray);
+        } catch (error) {
+            if (tableContainer) tableContainer.innerHTML = `<p>Kunde inte ladda projekt. Fel: ${error.message || error}</p>`;
+        }
+      }
+
+      function displayProjectsTable(projectsArray) {
+        // console.log("displayProjectsTable CALLED with:", projectsArray);
+        // showLoading(false); // Hanteras av callAppsScript
+        const container = document.getElementById('projectsTableContainer');
+        if (!container) {
+            console.error("displayProjectsTable: projectsTableContainer not found!");
+            showMessage("Kunde inte visa projekttabellen, intern DOM-struktur saknas.", "error");
+            return;
+        }
+
+        if (!projectsArray || projectsArray.length === 0) {
+          container.innerHTML = '<p>Inga projekt hittades.</p>'; // Förtydligat meddelande
+          return;
+        }
+
+        let tableHtml = '<table><thead><tr>';
+        tableHtml += '<th>ProjektID</th><th>Projektnamn</th><th>Vecka</th><th>Status</th><th>Åtgärder</th>';
+        tableHtml += '</tr></thead><tbody>';
+
+        projectsArray.forEach(project => {
+          tableHtml += `<tr data-projectid="${project.ProjectID}">`;
+          tableHtml += `<td>${project.ProjectID || 'Saknas'}</td>`;
+          tableHtml += `<td>${project.ProjectName || 'Saknas'}</td>`;
+          tableHtml += `<td>${project.WeekNumber || ''}</td>`;
+          tableHtml += `<td>${project.ProjectStatus || ''}</td>`;
+          tableHtml += `<td><button onclick="loadView('projectDetails', '${project.ProjectID}')">Visa Detaljer</button></td>`;
+          tableHtml += '</tr>';
+        });
+
+        tableHtml += '</tbody></table>';
+        container.innerHTML = tableHtml;
+        // console.log("displayProjectsTable FINISHED rendering table");
+      }
+
+      async function loadProjectDetailsView(projectID) {
+          // console.log("loadProjectDetailsView CALLED WITH projectID:", projectID);
+          const contentArea = document.getElementById('contentArea');
+          if (!contentArea) { console.error("loadProjectDetailsView: contentArea not found!"); return;}
+          contentArea.innerHTML = 'Laddar projektdetaljer...';
+
+          try {
+            const projectData = await callAppsScript('getProjectDetailsForFrontend', { projectID: projectID });
+            displayProjectDetails(projectData);
+          } catch (error) {
+            contentArea.innerHTML = `<p>Kunde inte ladda projektdetaljer. Fel: ${error.message || error}</p> <button onclick="loadView('projects')">Tillbaka till Projektlistan</button>`;
+          }
+      }
+
+      function displayProjectDetails(projectData) {
+          // console.log("displayProjectDetails CALLED with:", projectData);
+          // showLoading(false); // Hanteras av callAppsScript
+          const contentArea = document.getElementById('contentArea');
+          if (!contentArea) { console.error("displayProjectDetails: contentArea not found!"); return;}
+
+          if (!projectData || projectData.error) { // Om callAppsScript inte fångade det, men bör ha gjort det
+              showMessage(projectData ? projectData.error : 'Kunde inte ladda projektinformation.', 'error');
+              let backButtonHtml = `<button onclick="loadView('projects')">Tillbaka till Projektlistan</button>`;
+              contentArea.innerHTML = backButtonHtml;
+              return;
+          }
+
+          let detailsHtml = `
+            <h2>Projektdetaljer: ${projectData.ProjectName || projectData.ProjectID}</h2>
+            <div class="details-view">
+              <p><strong>ProjektID:</strong> <span>${projectData.ProjectID || ''}</span></p>
+              <p><strong>Projektnamn:</strong> <span>${projectData.ProjectName || ''}</span></p>
+              <p><strong>Veckonummer:</strong> <span>${projectData.WeekNumber || ''}</span></p>
+              <p><strong>Repetitioner:</strong> <span>${projectData.RehearsalSchedule || ''}</span></p>
+              <p><strong>Konsertdagar:</strong> <span>${projectData.ConcertSchedule || ''}</span></p>
+              <p><strong>Svarsdeadline (timmar):</strong> <span>${projectData.ResponseDeadlineHours === null || typeof projectData.ResponseDeadlineHours === 'undefined' || projectData.ResponseDeadlineHours === '' ? 'Ingen' : projectData.ResponseDeadlineHours}</span></p>
+              <p><strong>Drive Mapp-ID:</strong> <span>${projectData.DriveFolderID || '<i>Ej specificerat</i>'}</span></p>
+              <p><strong>Status:</strong> <span>${projectData.ProjectStatus || ''}</span></p>
+              <p><strong>Anteckningar:</strong> <pre>${projectData.Notes || '<i>Inga anteckningar</i>'}</pre></p>
+              <p><strong>Senast Ändrad:</strong> <span>${projectData.LastModified || ''}</span></p>
+              <p><strong>Skapad Datum:</strong> <span>${projectData.CreatedDate || ''}</span></p>
+            </div>
+            <div class="form-buttons">
+              <button onclick="loadView('projects')">Tillbaka till Projektlistan</button>
+              <button onclick="loadView('editProjectForm', '${projectData.ProjectID}')">Redigera Projekt</button>
+            </div>
+            <hr>
+            <h3>Behov för detta projekt:</h3>
+            <button onclick="loadView('createNeedForm', '${projectData.ProjectID}')">Lägg till Nytt Behov</button>
+            <div id="projectNeedsTableContainer">Laddar behov...</div>
+          `;
+          contentArea.innerHTML = detailsHtml;
+          displayProjectNeedsTable(projectData.needs); // Antag att 'needs' är en del av projectData
+          // console.log("displayProjectDetails FINISHED");
+      }
+
+      function displayProjectNeedsTable(needsArray) {
+        // console.log("displayProjectNeedsTable CALLED with:", needsArray);
+        const container = document.getElementById('projectNeedsTableContainer');
+        if (!container) { console.error("displayProjectNeedsTable: projectNeedsTableContainer not found!"); return;}
+
+        if (!needsArray || needsArray.length === 0) {
+          container.innerHTML = '<p>Inga behov specificerade för detta projekt ännu.</p>';
+          return;
+        }
+
+        let tableHtml = '<table><thead><tr>';
+        tableHtml += '<th>Instrument</th><th>Kvalifikation</th><th>Antal</th><th>Utskickstyp</th><th>Status</th><th>Åtgärder</th>';
+        tableHtml += '</tr></thead><tbody>';
+
+        needsArray.forEach(need => {
+          tableHtml += `<tr data-needid="${need.NeedID || ''}">`;
+          tableHtml += `<td>${need.InstrumentName || need.InstrumentID || ''}</td>`;
+          tableHtml += `<td>${need.QualificationName || need.InstrumentQualificationID || ''}</td>`;
+          tableHtml += `<td>${need.NeededQuantity || ''}</td>`;
+          tableHtml += `<td>${need.DispatchType || ''}</td>`;
+          tableHtml += `<td>${need.NeedStatus || ''}</td>`;
+          tableHtml += `<td><button onclick="loadView('editNeedForm', '${need.NeedID}')">Redigera</button> <button onclick="deleteNeed('${need.NeedID}')">Radera</button></td>`;
+          tableHtml += '</tr>';
+        });
+
+        tableHtml += '</tbody></table>';
+        container.innerHTML = tableHtml;
+        // console.log("displayProjectNeedsTable FINISHED");
+      }
+
+      async function deleteNeed(needID) {
+        // console.log("deleteNeed CALLED for NeedID:", needID);
+        if (!needID) {
+            showMessage("Inget behovs-ID angivet för radering.", "error");
+            return;
+        }
+        const confirmation = confirm(`Är du säker på att du vill radera Behov ID: ${needID}? Detta kan inte ångras och tar även bort alla relaterade svar.`);
+        if (confirmation) {
+            try {
+                const response = await callAppsScript('deleteNeedFromSheet', { needID: needID }, 'POST'); // Skicka som payload
+                onNeedDeleted(response.data || response); // Anpassa beroende på hur doPost returnerar
+            } catch (error) {
+                // onFailure hanteras redan av callAppsScript
+            }
+        } else {
+            console.log("Radera behov avbröts av användaren.");
+        }
+      }
+
+      function onNeedDeleted(response) { // response kan vara {success: true, data: {deletedNeedID: ..., projectID: ...}}
+        // console.log("onNeedDeleted CALLED with response:", response);
+        // showLoading(false); // Hanteras av callAppsScript
+        // Antag att response.data innehåller det som förväntas, eller att response är direkt det objektet
+        const data = response.data || response; // Om doPost wrappar i 'data'
+
+        if (data && (data.success || typeof data.deletedNeedID !== 'undefined')) { // Anpassat villkor
+            showMessage(`Behov (ID: ${data.deletedNeedID}) har raderats!`, 'success');
+            if (data.projectID) {
+                 loadView('projectDetails', data.projectID);
+            } else if (currentProjectID) {
+                 loadView('projectDetails', currentProjectID);
+            } else {
+                 loadView('projects');
+                 showMessage('Navigerar till projektlistan då aktuellt projekt-ID är okänt.', 'info');
+            }
+        } else if (data && data.error) {
+            showMessage('Kunde inte radera behov: ' + data.error, 'error');
+        } else {
+            showMessage('Radering av behov kan ha utförts, men oväntat svar från servern.', 'info');
+            if (currentProjectID) loadView('projectDetails', currentProjectID); else loadView('projects');
+        }
+      }
+
+      function loadCreateProjectForm() {
+        // console.log("loadCreateProjectForm CALLED");
+        const contentArea = document.getElementById('contentArea');
+        if (!contentArea) { console.error("loadCreateProjectForm: contentArea not found!"); showLoading(false); return;}
+        contentArea.innerHTML = `
+          <h2>Skapa Nytt Projekt</h2>
+          <div class="form-container">
+            <label for="projectName">Projektnamn:</label>
+            <input type="text" id="projectName" name="projectName" required>
+            <label for="weekNumber">Veckonummer:</label>
+            <input type="number" id="weekNumber" name="weekNumber">
+            <label for="rehearsalSchedule">Repetitioner (text):</label>
+            <textarea id="rehearsalSchedule" name="rehearsalSchedule"></textarea>
+            <label for="concertSchedule">Konsertdagar (text):</label>
+            <textarea id="concertSchedule" name="concertSchedule"></textarea>
+            <label for="responseDeadlineHours">Svarsdeadline (timmar, 0 för ingen):</label>
+            <input type="number" id="responseDeadlineHours" name="responseDeadlineHours" value="24">
+            <label for="driveFolderID">Google Drive Mapp-ID (valfritt):</label>
+            <input type="text" id="driveFolderID" name="driveFolderID">
+            <label for="projectStatus">Projektstatus:</label>
+            <select id="projectStatus" name="projectStatus">
+              <option value="Planned" selected>Planerat</option>
+              <option value="Active">Aktivt</option>
+              <option value="Paused">Pausat</option>
+            </select>
+            <label for="projectNotes">Anteckningar:</label>
+            <textarea id="projectNotes" name="projectNotes"></textarea>
+            <div class="form-buttons">
+              <button onclick="submitNewProject()">Spara Projekt</button>
+              <button onclick="loadView('projects')">Avbryt</button>
+            </div>
+          </div>
+        `;
+        showLoading(false); // Manuell hantering
+        // console.log("loadCreateProjectForm FINISHED");
+      }
+
+      async function submitNewProject() {
+        // console.log("submitNewProject CALLED");
+        const projectData = {
+          ProjectName: document.getElementById('projectName').value,
+          WeekNumber: document.getElementById('weekNumber').value,
+          RehearsalSchedule: document.getElementById('rehearsalSchedule').value,
+          ConcertSchedule: document.getElementById('concertSchedule').value,
+          ResponseDeadlineHours: document.getElementById('responseDeadlineHours').value,
+          DriveFolderID: document.getElementById('driveFolderID').value,
+          ProjectStatus: document.getElementById('projectStatus').value,
+          Notes: document.getElementById('projectNotes').value
+        };
+        if (!projectData.ProjectName) {
+          showMessage('Projektnamn måste fyllas i.', 'error');
+          // showLoading(false); // Inte nödvändigt, callAppsScript anropas inte
+          return;
+        }
+        try {
+            const response = await callAppsScript('createNewProject', projectData, 'POST');
+            onProjectSaved(response.data || response); // Anpassa beroende på doPost-svar
+        } catch (error) {
+            // onFailure hanteras av callAppsScript
+        }
+      }
+
+      function onProjectSaved(response) { // Antag att response är det faktiska projektobjektet eller {error: ...}
+        // console.log("onProjectSaved CALLED with:", response);
+        // showLoading(false); // Hanteras av callAppsScript
+        const data = response.data || response; // Om doPost wrappar i 'data'
+
+        if (data && data.ProjectID) { // Direktkontroll på data
+          showMessage(`Projektet "${data.ProjectName}" (ID: ${data.ProjectID}) har sparats!`, 'success');
+          loadView('projects');
+        } else if (data && data.error) {
+           showMessage('Kunde inte spara projekt: ' + data.error, 'error');
+        } else {
+          showMessage('Projektet sparades, men oväntat svar från servern.', 'info');
+          loadView('projects');
+        }
+      }
+
+      async function loadEditProjectForm(projectID) {
+          // console.log("loadEditProjectForm CALLED WITH projectID:", projectID);
+          const contentArea = document.getElementById('contentArea');
+          if (!contentArea) { console.error("loadEditProjectForm: contentArea not found!"); return;}
+          contentArea.innerHTML = 'Laddar projekt för redigering...';
+
+          try {
+            const projectData = await callAppsScript('getProjectDetailsForFrontend', { projectID: projectID });
+            displayEditProjectForm(projectData);
+          } catch (error) {
+             if (currentProjectID) {
+                loadView('projectDetails', currentProjectID);
+              } else {
+                loadView('projects');
+              }
+          }
+      }
+
+      function displayEditProjectForm(projectData) {
+          // console.log("displayEditProjectForm CALLED with:", projectData);
+          // showLoading(false); // Hanteras av callAppsScript
+          const contentArea = document.getElementById('contentArea');
+          if (!contentArea) { console.error("displayEditProjectForm: contentArea not found!"); return;}
+
+          if (!projectData || projectData.error) {
+              showMessage(projectData ? projectData.error : 'Kunde inte ladda projektdata för redigering.', 'error');
+              if (currentProjectID) {
+                loadView('projectDetails', currentProjectID);
+              } else {
+                loadView('projects');
+              }
+              return;
+          }
+          currentProjectID = projectData.ProjectID;
+          contentArea.innerHTML = `
+            <h2>Redigera Projekt: ${projectData.ProjectName || projectData.ProjectID}</h2>
+            <div class="form-container">
+              <input type="hidden" id="editProjectID" value="${projectData.ProjectID}">
+              <label for="editProjectName">Projektnamn:</label>
+              <input type="text" id="editProjectName" value="${projectData.ProjectName || ''}">
+              <label for="editWeekNumber">Veckonummer:</label>
+              <input type="number" id="editWeekNumber" value="${projectData.WeekNumber || ''}">
+              <label for="editRehearsalSchedule">Repetitioner:</label>
+              <textarea id="editRehearsalSchedule">${projectData.RehearsalSchedule || ''}</textarea>
+              <label for="editConcertSchedule">Konsertdagar:</label>
+              <textarea id="editConcertSchedule">${projectData.ConcertSchedule || ''}</textarea>
+              <label for="editResponseDeadlineHours">Svarsdeadline (timmar, 0 för ingen):</label>
+              <input type="number" id="editResponseDeadlineHours" value="${projectData.ResponseDeadlineHours === null || typeof projectData.ResponseDeadlineHours === 'undefined' || projectData.ResponseDeadlineHours === '' ? '' : projectData.ResponseDeadlineHours}">
+              <label for="editDriveFolderID">Google Drive Mapp-ID:</label>
+              <input type="text" id="editDriveFolderID" value="${projectData.DriveFolderID || ''}">
+              <label for="editProjectStatus">Projektstatus:</label>
+              <select id="editProjectStatus">
+                <option value="Planned"${projectData.ProjectStatus === 'Planned' ? ' selected' : ''}>Planerat</option>
+                <option value="Active"${projectData.ProjectStatus === 'Active' ? ' selected' : ''}>Aktivt</option>
+                <option value="Paused"${projectData.ProjectStatus === 'Paused' ? ' selected' : ''}>Pausat</option>
+                <option value="Completed"${projectData.ProjectStatus === 'Completed' ? ' selected' : ''}>Slutfört</option>
+                <option value="Archived"${projectData.ProjectStatus === 'Archived' ? ' selected' : ''}>Arkiverat</option>
+              </select>
+              <label for="editProjectNotes">Anteckningar:</label>
+              <textarea id="editProjectNotes">${projectData.Notes || ''}</textarea>
+              <div class="form-buttons">
+                <button onclick="submitUpdateProject()">Spara Ändringar</button>
+                <button onclick="loadView('projectDetails', '${projectData.ProjectID}')">Avbryt</button>
+              </div>
+            </div>
+          `;
+          // console.log("displayEditProjectForm FINISHED");
+      }
+
+      async function submitUpdateProject() {
+        // console.log("submitUpdateProject CALLED");
+        const projectDataWithID = {
+          ProjectID: document.getElementById('editProjectID').value,
+          ProjectName: document.getElementById('editProjectName').value,
+          WeekNumber: document.getElementById('editWeekNumber').value,
+          RehearsalSchedule: document.getElementById('editRehearsalSchedule').value,
+          ConcertSchedule: document.getElementById('editConcertSchedule').value,
+          ResponseDeadlineHours: document.getElementById('editResponseDeadlineHours').value,
+          DriveFolderID: document.getElementById('editDriveFolderID').value,
+          ProjectStatus: document.getElementById('editProjectStatus').value,
+          Notes: document.getElementById('editProjectNotes').value
+        };
+        if (!projectDataWithID.ProjectName) {
+          showMessage('Projektnamn måste fyllas i.', 'error');
+          return;
+        }
+        if (!projectDataWithID.ProjectID) {
+          showMessage('FEL: Projekt-ID saknas. Kan inte uppdatera.', 'error');
+          return;
+        }
+        try {
+            const response = await callAppsScript('updateExistingProject', projectDataWithID, 'POST');
+            onProjectUpdated(response.data || response);
+        } catch (error) {
+            // onFailure hanteras av callAppsScript
+        }
+      }
+
+      function onProjectUpdated(response) {
+        // console.log("onProjectUpdated CALLED with:", response);
+        // showLoading(false); // Hanteras av callAppsScript
+        const data = response.data || response; // Om doPost wrappar
+
+        if (data && (data.success || data.ProjectID)) { // Anpassat
+          showMessage(`Projekt "${data.ProjectName || projectDataWithID.ProjectName }" (ID: ${data.ProjectID || projectDataWithID.ProjectID}) har uppdaterats!`, 'success');
+          loadView('projectDetails', data.ProjectID || projectDataWithID.ProjectID);
+        } else if (data && data.error) {
+           showMessage('Kunde inte uppdatera projekt: ' + data.error, 'error');
+        } else {
+          showMessage('Projektet uppdaterades, men oväntat svar från servern.', 'info');
+          loadView('projects');
+        }
+      }
+
+      async function loadCreateNeedForm(projectIDForNeed) {
+        // console.log("loadCreateNeedForm CALLED for ProjectID:", projectIDForNeed);
+        currentProjectID = projectIDForNeed;
+        currentNeedID = null;
+
+        const contentArea = document.getElementById('contentArea');
+        if (!contentArea) { console.error("loadCreateNeedForm: contentArea not found!"); showLoading(false); return;}
+        contentArea.innerHTML = 'Laddar formulär för nytt behov...';
+
+        await _buildNeedForm(null); // null indikerar att det är "create" mode
+      }
+
+      async function loadEditNeedForm(needID) {
+        // console.log("loadEditNeedForm CALLED for NeedID:", needID);
+        currentNeedID = needID;
+        const contentArea = document.getElementById('contentArea');
+        if (!contentArea) { console.error("loadEditNeedForm: contentArea not found!"); showLoading(false); return;}
+        contentArea.innerHTML = 'Laddar behov för redigering...';
+
+        try {
+            const needData = await callAppsScript('getNeedDetailsForEdit', { needID: needID });
+            await _buildNeedForm(needData);
+        } catch (error) {
+            contentArea.innerHTML = `<p>Kunde inte ladda behovsdata. Fel: ${error.message || error}</p>`;
+        }
+      }
+
+      async function _buildNeedForm(needData) { // Gjort async
+        // console.log("_buildNeedForm CALLED. NeedData:", needData);
+        const contentArea = document.getElementById('contentArea');
+        if (!contentArea) { console.error("_buildNeedForm: contentArea not found!"); showLoading(false); return;}
+
+        const isEditMode = (needData && needData.NeedID);
+        const formTitle = isEditMode ? `Redigera Behov (ID: ${needData.NeedID})` : `Lägg till Nytt Behov för Projekt: ${currentProjectID}`;
+        const submitButtonText = isEditMode ? "Spara Ändringar (Behov)" : "Spara Behov";
+        const submitFunction = isEditMode ? "submitUpdateNeed()" : "submitNewNeed()";
+
+        if (isEditMode && needData.ProjectID) {
+            currentProjectID = needData.ProjectID;
+        }
+
+        contentArea.innerHTML = `
+          <h2>${formTitle}</h2>
+          <div class="form-container">
+            <input type="hidden" id="need_ProjectID_field" value="${isEditMode ? (needData.ProjectID || currentProjectID) : currentProjectID}">
+            ${isEditMode ? `<input type="hidden" id="need_NeedID_field" value="${needData.NeedID}">` : ''}
+
+            <label for="needInstrument">Instrument:</label>
+            <select id="needInstrument" onchange="handleInstrumentChange('needQualification', 'needRankingList', this.value)">
+              <option value="">${isEditMode ? 'Laddar...' : 'Välj instrument...'}</option>
+            </select>
+
+            <label for="needQualification">Kvalifikation/Roll:</label>
+            <select id="needQualification" onchange="handleQualificationChange('needRankingList', this.value)" disabled>
+              <option value="">Välj instrument först...</option>
+            </select>
+
+            <label for="needRankingList">Rankningslista:</label>
+            <select id="needRankingList" disabled>
+              <option value="">Välj kvalifikation först...</option>
+            </select>
+
+            <label for="needNeededQuantity">Antal som behövs:</label>
+            <input type="number" id="needNeededQuantity" value="${isEditMode ? (needData.NeededQuantity || 1) : 1}" min="1">
+
+            <label for="needDispatchType">Utskickstyp:</label>
+            <select id="needDispatchType" onchange="toggleMaxParallelForFCFS('maxParallelContainer', 'needDispatchType')">
+              <option value="Sequential"${(isEditMode && needData.DispatchType === 'Sequential') || !isEditMode ? ' selected' : ''}>Sekventiellt</option>
+              <option value="Parallel"${isEditMode && needData.DispatchType === 'Parallel' ? ' selected' : ''}>Parallellt</option>
+              <option value="FCFS"${isEditMode && needData.DispatchType === 'FCFS' ? ' selected' : ''}>Först till Kvarn (FCFS)</option>
+            </select>
+
+            <div id="maxParallelContainer" style="display:${(isEditMode && needData.DispatchType === 'FCFS') ? 'block' : 'none'};">
+              <label for="needMaxParallelDispatches">Max antal samtidiga för FCFS-batch:</label>
+              <input type="number" id="needMaxParallelDispatches" value="${isEditMode ? (needData.MaxParallelDispatches || 5) : 5}" min="1">
+            </div>
+
+            <label for="needRequiresAccomodation">Kräver Eget Boende:</label>
+            <select id="needRequiresAccomodation">
+                <option value="NO"${(isEditMode && (needData.RequiresOwnAccomodation === 'NO' || !needData.RequiresOwnAccomodation)) || !isEditMode ? ' selected' : ''}>Nej</option>
+                <option value="YES"${isEditMode && needData.RequiresOwnAccomodation === 'YES' ? ' selected' : ''}>Ja</option>
+            </select>
+
+            <label for="needStatus">Behovsstatus:</label>
+            <select id="needStatus">
+              <option value="Active"${(isEditMode && needData.NeedStatus === 'Active') || !isEditMode ? ' selected' : ''}>Aktivt</option>
+              <option value="Paused"${isEditMode && needData.NeedStatus === 'Paused' ? ' selected' : ''}>Pausat</option>
+              <option value="Filled"${isEditMode && needData.NeedStatus === 'Filled' ? ' selected' : ''}>Fyllt</option>
+            </select>
+
+            <label for="needNotes">Anteckningar för behovet:</label>
+            <textarea id="needNotes">${isEditMode ? (needData.Notes || '') : ''}</textarea>
+
+            <div class="form-buttons">
+              <button onclick="${submitFunction}">${submitButtonText}</button>
+              <button onclick="loadView('projectDetails', '${currentProjectID}')">Avbryt</button>
+            </div>
+          </div>
+        `;
+        
+        showLoading(true); // Starta loading innan async anrop
+        try {
+            if (isEditMode) {
+                await populateAndSelectInstrumentsDropdown('needInstrument', needData.InstrumentID);
+                await handleInstrumentChange('needQualification', 'needRankingList', needData.InstrumentID, needData.InstrumentQualificationID);
+                await handleQualificationChange('needRankingList', needData.InstrumentQualificationID, needData.RankingListID);
+            } else {
+                await populateAndSelectInstrumentsDropdown('needInstrument', null);
+                // De andra dropdownsen fylls via onchange-händelser
+            }
+        } catch (err) {
+            console.error("Error populating dropdowns in _buildNeedForm", err);
+            showMessage("Kunde inte ladda dropdown-data.", "error");
+        } finally {
+            showLoading(false); // Stäng av loading efter alla async anrop är klara
+        }
+        
+        // Manuell toggling efter att allt är laddat
+        const dispatchTypeSelect = document.getElementById('needDispatchType');
+        if(dispatchTypeSelect) { // Kontrollera att elementet finns
+             toggleMaxParallelForFCFS('maxParallelContainer', 'needDispatchType');
+        }
+        // console.log("_buildNeedForm FINISHED logic. Edit mode:", isEditMode);
+      }
+
+      function populateDropdown(selectElementId, optionsArray, defaultOptionText = "Välj...") {
+        const selectElement = document.getElementById(selectElementId);
+        if (!selectElement) {
+            console.error(`populateDropdown: Element with ID '${selectElementId}' not found!`);
+            return;
+        }
+        selectElement.innerHTML = `<option value="">${defaultOptionText}</option>`;
+        if (optionsArray && optionsArray.length > 0) {
+          optionsArray.forEach(option => {
+            if (typeof option.id !== 'undefined' && typeof option.name !== 'undefined') {
+              selectElement.innerHTML += `<option value="${option.id}">${option.name}</option>`;
+            } else {
+              // console.warn(`populateDropdown: Option for ${selectElementId} is malformed:`, option);
+            }
+          });
+        }
+      }
+
+      async function populateAndSelectInstrumentsDropdown(selectElementId, valueToSelect) { // Tog bort callback
+        // console.log(`populateAndSelectInstrumentsDropdown CALLED for ${selectElementId}, select: ${valueToSelect}`);
+        const qualSelectId = selectElementId === 'needInstrument' ? 'needQualification' : (selectElementId.startsWith('musicianQualificationInstrument_') ? `musicianInstrumentQualification_${selectElementId.split('_')[1]}` : null);
+        const rankSelectId = selectElementId === 'needInstrument' ? 'needRankingList' : null;
+
+        if(qualSelectId) { const qs = document.getElementById(qualSelectId); if(qs) qs.disabled = true; }
+        if(rankSelectId) { const rs = document.getElementById(rankSelectId); if(rs) rs.disabled = true; }
+
+
+        try {
+            const instruments = await callAppsScript('getInstrumentsForDropdown');
+            populateDropdown(selectElementId, instruments, 'Välj instrument...');
+            const selectElem = document.getElementById(selectElementId);
+            if (selectElem && valueToSelect) {
+              selectElem.value = valueToSelect;
+            }
+        } catch (error) {
+            populateDropdown(selectElementId, [], 'Kunde inte ladda instrument');
+            // Felhantering sker i callAppsScript
+        }
+      }
+
+      async function handleInstrumentChange(qualificationSelectId, rankingListSelectIdOrNull, instrumentID, qualificationToSelect = null) { // Tog bort callback
+        const qualSelect = document.getElementById(qualificationSelectId);
+        const rankSelect = rankingListSelectIdOrNull ? document.getElementById(rankingListSelectIdOrNull) : null;
+
+        populateDropdown(qualificationSelectId, [], 'Välj instrument först...');
+        if(qualSelect) qualSelect.disabled = true;
+        if(rankSelect) {
+            populateDropdown(rankingListSelectIdOrNull, [], 'Välj instrument först...');
+            rankSelect.disabled = true;
+        }
+
+        if (instrumentID && instrumentID !== "") {
+          if(qualSelect) qualSelect.disabled = false;
+          populateDropdown(qualificationSelectId, [], 'Laddar kvalifikationer...');
+
+          try {
+            const qualifications = await callAppsScript('getQualificationsForInstrumentForDropdown', { instrumentID: instrumentID });
+            populateDropdown(qualificationSelectId, qualifications, 'Välj kvalifikation...');
+            if(qualSelect) {
+              if(qualificationToSelect) qualSelect.value = qualificationToSelect;
+              qualSelect.disabled = !(qualifications && qualifications.length > 0);
+              if(qualSelect.disabled) populateDropdown(qualificationSelectId, [], 'Inga kvalifikationer'); // Tydligare
+            }
+          } catch (error) {
+            populateDropdown(qualificationSelectId, [], 'Kunde inte ladda kvalifikationer');
+            if(qualSelect) qualSelect.disabled = true;
+          }
+        }
+      }
+
+      async function handleQualificationChange(rankingListSelectId, instrumentQualificationID, rankingListToSelect = null) { // Tog bort callback
+        const rankSelect = document.getElementById(rankingListSelectId);
+
+        populateDropdown(rankingListSelectId, [], 'Välj kvalifikation först...');
+        if(rankSelect) rankSelect.disabled = true;
+
+        if (instrumentQualificationID && instrumentQualificationID !== "") {
+          if(rankSelect) rankSelect.disabled = false;
+          populateDropdown(rankingListSelectId, [], 'Laddar rankningslistor...');
+
+          try {
+            const rankingLists = await callAppsScript('getRankingListsForQualificationForDropdown', { instrumentQualificationID: instrumentQualificationID });
+            populateDropdown(rankingListSelectId, rankingLists, 'Välj rankningslista...');
+            if(rankSelect) {
+              if(rankingListToSelect) rankSelect.value = rankingListToSelect;
+              rankSelect.disabled = !(rankingLists && rankingLists.length > 0);
+              if(rankSelect.disabled) populateDropdown(rankingListSelectId, [], 'Inga rankningslistor'); // Tydligare
+            }
+          } catch (error) {
+             populateDropdown(rankingListSelectId, [], 'Kunde inte ladda rankningslistor');
+             if(rankSelect) rankSelect.disabled = true;
+          }
+        }
+      }
+
+      function toggleMaxParallelForFCFS(containerId = 'maxParallelContainer', selectId = 'needDispatchType') {
+        const dispatchTypeSelect = document.getElementById(selectId);
+        const container = document.getElementById(containerId);
+        if (dispatchTypeSelect && container) {
+            container.style.display = dispatchTypeSelect.value === 'FCFS' ? 'block' : 'none';
+        }
+      }
+
+      async function submitNewNeed() {
+        // console.log("submitNewNeed CALLED");
+        const needData = {
+            ProjectID: document.getElementById('need_ProjectID_field').value,
+            InstrumentID: document.getElementById('needInstrument').value,
+            InstrumentQualificationID: document.getElementById('needQualification').value,
+            RankingListID: document.getElementById('needRankingList').value,
+            NeededQuantity: document.getElementById('needNeededQuantity').value,
+            DispatchType: document.getElementById('needDispatchType').value,
+            MaxParallelDispatches: document.getElementById('needDispatchType').value === 'FCFS' ? document.getElementById('needMaxParallelDispatches').value : null,
+            RequiresOwnAccomodation: document.getElementById('needRequiresAccomodation').value,
+            Notes: document.getElementById('needNotes').value,
+            NeedStatus: document.getElementById('needStatus').value
+        };
+
+        if (!needData.InstrumentID) { showMessage("Välj ett instrument.", "error"); return; }
+        if (!needData.InstrumentQualificationID) { showMessage("Välj en kvalifikation/roll.", "error"); return; }
+        if (!needData.RankingListID) { showMessage("Välj en rankningslista.", "error"); return; }
+        const neededQtyNum = parseInt(needData.NeededQuantity);
+        if (isNaN(neededQtyNum) || neededQtyNum < 1) { showMessage("Ange ett giltigt antal som behövs (minst 1).", "error"); return; }
+        if (needData.DispatchType === 'FCFS') {
+            const maxParallelNum = parseInt(needData.MaxParallelDispatches);
+            if (isNaN(maxParallelNum) || maxParallelNum < 1) {
+                showMessage("Ange ett giltigt maxantal för FCFS-batchen (minst 1).", "error"); return;
+            }
+        }
+        // console.log("Submitting new need:", needData);
+        try {
+            const response = await callAppsScript('createNewNeed', needData, 'POST');
+            onNeedSavedOrUpdated(response.data || response);
+        } catch (error) {
+            // onFailure hanteras av callAppsScript
+        }
+      }
+
+      async function submitUpdateNeed() {
+        // console.log("submitUpdateNeed CALLED");
+        const needData = {
+            NeedID: document.getElementById('need_NeedID_field').value,
+            ProjectID: document.getElementById('need_ProjectID_field').value,
+            InstrumentID: document.getElementById('needInstrument').value,
+            InstrumentQualificationID: document.getElementById('needQualification').value,
+            RankingListID: document.getElementById('needRankingList').value,
+            NeededQuantity: document.getElementById('needNeededQuantity').value,
+            DispatchType: document.getElementById('needDispatchType').value,
+            MaxParallelDispatches: document.getElementById('needDispatchType').value === 'FCFS' ? document.getElementById('needMaxParallelDispatches').value : null,
+            RequiresOwnAccomodation: document.getElementById('needRequiresAccomodation').value,
+            NeedStatus: document.getElementById('needStatus').value,
+            Notes: document.getElementById('needNotes').value
+        };
+
+        if (!needData.NeedID) { showMessage("FEL: Behovs-ID saknas. Kan inte uppdatera.", "error"); return;}
+        if (!needData.InstrumentID) { showMessage("Välj ett instrument.", "error"); return; }
+        if (!needData.InstrumentQualificationID) { showMessage("Välj en kvalifikation/roll.", "error"); return; }
+        if (!needData.RankingListID) { showMessage("Välj en rankningslista.", "error"); return; }
+        const neededQtyNum_edit = parseInt(needData.NeededQuantity);
+        if (isNaN(neededQtyNum_edit) || neededQtyNum_edit < 1) { showMessage("Ange ett giltigt antal som behövs (minst 1).", "error"); return; }
+         if (needData.DispatchType === 'FCFS') {
+            const maxParallelNum_edit = parseInt(needData.MaxParallelDispatches);
+            if (isNaN(maxParallelNum_edit) || maxParallelNum_edit < 1) {
+                showMessage("Ange ett giltigt maxantal för FCFS-batchen (minst 1).", "error"); return;
+            }
+        }
+        // console.log("Submitting updated need:", needData);
+        try {
+            const response = await callAppsScript('updateExistingNeed', needData, 'POST');
+            onNeedSavedOrUpdated(response.data || response);
+        } catch (error) {
+            // onFailure hanteras av callAppsScript
+        }
+      }
+
+      function onNeedSavedOrUpdated(response) {
+        // console.log("onNeedSavedOrUpdated CALLED with:", response);
+        // showLoading(false); // Hanteras av callAppsScript
+        const data = response.data || response;
+
+        if (data && (data.success || data.NeedID) && data.ProjectID) {
+            const action = (currentView === 'createNeedForm' || !document.getElementById('need_NeedID_field')) ? 'sparats' : 'uppdaterats';
+            showMessage(`Behov (ID: ${data.NeedID}) har ${action} för projekt ${data.ProjectID}!`, 'success');
+            loadView('projectDetails', data.ProjectID);
+        } else if (data && data.error) {
+            const action = (currentView === 'createNeedForm' || !document.getElementById('need_NeedID_field')) ? 'spara' : 'uppdatera';
+            showMessage(`Kunde inte ${action} behov: ${data.error}`, 'error');
+        } else {
+            const action = (currentView === 'createNeedForm' || !document.getElementById('need_NeedID_field')) ? 'sparades' : 'uppdaterades';
+            showMessage(`Behovet kan ha ${action}, men oväntat/ofullständigt svar från servern.`, 'info');
+            if (currentProjectID) loadView('projectDetails', currentProjectID);
+            else loadView('projects');
+        }
+      }
+      // --- SLUT PÅ SKAPA/REDIGERA BEHOV ---
+
+      // --- MUSIKERHANTERING ---
+      async function loadMusiciansView() {
+        // console.log("loadMusiciansView CALLED");
+        const musiciansContainer = document.getElementById('musiciansViewContainer');
+        if (!musiciansContainer) { console.error("loadMusiciansView: musiciansViewContainer element not found!"); showLoading(false); return; }
+        musiciansContainer.innerHTML = `<h2>Musiker</h2><button onclick="loadView('createMusicianForm')">Skapa Ny Musiker</button><button onclick="fetchAndDisplayMusicians()">Ladda/Uppdatera Musikerlista</button><div id="musiciansTableContainerInView"><table><thead><tr><th>Namn</th><th>Email</th><th>Telefon</th><th>Primärt Instrument</th><th>Åtgärder</th></tr></thead><tbody id="musiciansTableBodyInView"><tr><td colspan="5">Laddar musiker...</td></tr></tbody></table></div>`;
+        await fetchAndDisplayMusicians();
+        // console.log("loadMusiciansView FINISHED");
+      }
+
+      async function fetchAndDisplayMusicians() {
+        // console.log("fetchAndDisplayMusicians CALLED");
+        const tableBody = document.getElementById('musiciansTableBodyInView');
+        if (tableBody) { tableBody.innerHTML = '<tr><td colspan="5">Hämtar musikerdata...</td></tr>'; }
+        else { console.error("fetchAndDisplayMusicians: CRITICAL - musiciansTableBodyInView not found!"); return; }
+        try {
+            const musiciansArray = await callAppsScript('getMusiciansListForFrontend');
+            displayMusiciansTable(musiciansArray);
+        } catch (error) {
+            if (tableBody) tableBody.innerHTML = `<tr><td colspan="5">Kunde inte ladda musiker. Fel: ${error.message || error}</td></tr>`;
+        }
+      }
+
+      function displayMusiciansTable(musiciansArray) {
+        // console.log("displayMusiciansTable CALLED with:", musiciansArray);
+        // showLoading(false); // Hanteras av callAppsScript
+        const tableBody = document.getElementById('musiciansTableBodyInView');
+        if (!tableBody) { console.error("displayMusiciansTable: musiciansTableBodyInView not found!"); return; }
+        tableBody.innerHTML = '';
+        if (!musiciansArray || musiciansArray.length === 0) { tableBody.innerHTML = '<tr><td colspan="5">Inga musiker hittades.</td></tr>'; return; }
+        musiciansArray.forEach(musician => {
+          const row = tableBody.insertRow();
+          row.setAttribute('data-musician-id', musician.musicianId);
+          row.insertCell().textContent = `${musician.firstName || ''} ${musician.lastName || ''}`;
+          row.insertCell().textContent = musician.email || '';
+          row.insertCell().textContent = musician.phone || '';
+          row.insertCell().textContent = musician.primaryInstrumentName || 'Ej angett';
+          const actionsCell = row.insertCell();
+          actionsCell.innerHTML = `<button onclick="loadView('editMusicianForm', '${musician.musicianId}')">Redigera</button>`;
+        });
+        // console.log("displayMusiciansTable FINISHED");
+      }
+
+      async function loadCreateMusicianForm() {
+        // console.log("loadCreateMusicianForm CALLED");
+        currentMusicianID = null;
+        musicianQualificationRowCounter = 0;
+        const musiciansContainer = document.getElementById('musiciansViewContainer');
+        if (!musiciansContainer) { console.error("loadCreateMusicianForm: musiciansViewContainer not found!"); showLoading(false); return; }
+        musiciansContainer.innerHTML = `<h2>Skapa Ny Musiker</h2><div class="form-container"><input type="hidden" id="musicianFormMusicianId" value=""><label for="musicianFirstName">Förnamn:</label><input type="text" id="musicianFirstName" required><label for="musicianLastName">Efternamn:</label><input type="text" id="musicianLastName" required><label for="musicianEmail">E-post:</label><input type="email" id="musicianEmail" required><label for="musicianPhone">Telefon:</label><input type="tel" id="musicianPhone"><label for="musicianPrimaryInstrument">Primärt Instrument:</label><select id="musicianPrimaryInstrument"><option value="">Laddar...</option></select><label for="musicianHasOwnAccomodation">Har Eget Boende:</label><select id="musicianHasOwnAccomodation"><option value="NO" selected>Nej</option><option value="YES">Ja</option></select><label for="musicianNotes">Anteckningar:</label><textarea id="musicianNotes"></textarea><label for="musicianStatus">Status:</label><select id="musicianStatus"><option value="Active" selected>Aktiv</option><option value="Inactive">Inaktiv</option><option value="DoNotContact">Kontakta Ej</option></select><div class="qualifications-section"><h3>Kvalifikationer</h3><div id="musicianQualificationsContainer"></div><button type="button" onclick="addMusicianQualificationRow()">Lägg till Kvalifikation</button></div><div class="form-buttons"><button id="saveMusicianButton" onclick="submitNewMusician()">Spara Musiker</button><button onclick="loadView('musicians')">Avbryt</button></div></div>`;
+        showLoading(true);
+        try {
+            await populateAndSelectInstrumentsDropdown('musicianPrimaryInstrument', null);
+        } finally {
+            showLoading(false);
+        }
+      }
+
+      async function addMusicianQualificationRow() { // Gjorde async för att kunna awaita dropdown
+        // console.log("addMusicianQualificationRow CALLED");
+        musicianQualificationRowCounter++;
+        const container = document.getElementById('musicianQualificationsContainer');
+        if (!container) { console.error("addMusicianQualificationRow: musicianQualificationsContainer not found!"); return; }
+        const rowId = musicianQualificationRowCounter;
+        const newRowDiv = document.createElement('div');
+        newRowDiv.className = 'qualification-row';
+        newRowDiv.id = `qualRow_${rowId}`;
+        newRowDiv.innerHTML = `<select id="musicianQualificationInstrument_${rowId}" onchange="handleMusicianInstrumentRowChange(${rowId})"><option value="">Välj instrument...</option></select><select id="musicianInstrumentQualification_${rowId}" disabled><option value="">Välj instrument först...</option></select><button type="button" onclick="removeMusicianQualificationRow(${rowId})">X</button>`;
+        container.appendChild(newRowDiv);
+        const primaryInstrumentDropdown = document.getElementById('musicianPrimaryInstrument');
+        const preselectedInstrumentId = primaryInstrumentDropdown ? primaryInstrumentDropdown.value : null;
+        showLoading(true);
+        try {
+            await populateAndSelectInstrumentsDropdown(`musicianQualificationInstrument_${rowId}`, preselectedInstrumentId);
+            if (preselectedInstrumentId) {
+                await handleMusicianInstrumentRowChange(rowId); // Vänta på denna också
+            }
+        } finally {
+            showLoading(false);
+        }
+      }
+
+      function removeMusicianQualificationRow(rowId) {
+        // console.log("removeMusicianQualificationRow for rowId:", rowId);
+        const rowToRemove = document.getElementById(`qualRow_${rowId}`);
+        if (rowToRemove) rowToRemove.remove();
+      }
+
+      async function handleMusicianInstrumentRowChange(rowId) { // Gjorde async
+        const instSelId = `musicianQualificationInstrument_${rowId}`;
+        const qualSelId = `musicianInstrumentQualification_${rowId}`;
+        const instDrop = document.getElementById(instSelId);
+        if (!instDrop) { console.error(`Instrument dropdown ${instSelId} not found.`); return; }
+        const selInstId = instDrop.value;
+        // console.log(`handleMusicianInstrumentRowChange for row ${rowId}, InstrumentID: ${selInstId}`);
+        await handleInstrumentChange(qualSelId, null, selInstId, null);
+        // console.log(`Quals loaded for ${selInstId} on row ${rowId}`);
+      }
+
+      async function submitNewMusician() {
+        // console.log("submitNewMusician CALLED");
+        const quals = [];
+        const qCont = document.getElementById('musicianQualificationsContainer');
+        if (qCont) { qCont.querySelectorAll('.qualification-row').forEach(r => { const rIdSuf = r.id.split('_')[1]; const iSel = document.getElementById(`musicianQualificationInstrument_${rIdSuf}`); const qSel = document.getElementById(`musicianInstrumentQualification_${rIdSuf}`); if (iSel && qSel && iSel.value && qSel.value) { quals.push({ instrumentQualificationId: qSel.value }); } }); }
+        const data = {
+          firstName: document.getElementById('musicianFirstName').value.trim(),
+          lastName: document.getElementById('musicianLastName').value.trim(),
+          email: document.getElementById('musicianEmail').value.trim(),
+          phone: document.getElementById('musicianPhone').value.trim(),
+          primaryInstrumentId: document.getElementById('musicianPrimaryInstrument').value,
+          hasOwnAccomodation: document.getElementById('musicianHasOwnAccomodation').value,
+          notes: document.getElementById('musicianNotes').value.trim(),
+          status: document.getElementById('musicianStatus').value,
+          qualifications: quals
+        };
+        // console.log("Submitting new musician data:", data);
+        if (!data.firstName || !data.lastName || !data.email) { showMessage("Namn och e-post krävs.", "error"); return; }
+        try {
+            const response = await callAppsScript('createNewMusician', data, 'POST');
+            onMusicianSaved(response.data || response);
+        } catch (error) {
+            // onFailure hanteras av callAppsScript
+        }
+      }
+
+      function onMusicianSaved(response) {
+        // console.log("onMusicianSaved CALLED with:", response);
+        // showLoading(false); // Hanteras av callAppsScript
+        const data = response.data || response;
+
+        if (data && data.success) { showMessage(data.message || `Musiker sparad!`, 'success'); loadView('musicians'); }
+        else { showMessage('Kunde inte spara musiker: ' + (data ? data.error : 'Okänt fel'), 'error'); }
+      }
+
+      async function loadEditMusicianForm(musicianId) {
+        // console.log("loadEditMusicianForm for musicianId:", musicianId);
+        currentMusicianID = musicianId;
+        musicianQualificationRowCounter = 0;
+        const musiciansContainer = document.getElementById('musiciansViewContainer');
+        if (!musiciansContainer) { console.error("loadEditMusicianForm: musiciansViewContainer not found!"); showLoading(false); return; }
+        musiciansContainer.innerHTML = `<div class="form-container"><p>Laddar data för musiker ID: ${musicianId}...</p></div>`;
+        try {
+            const musicianData = await callAppsScript('getMusicianDetailsForEdit', { musicianId: musicianId });
+            await displayEditMusicianForm(musicianData); // Vänta här
+        } catch (error) {
+            musiciansContainer.innerHTML = `<div class="form-container"><p>Fel vid laddning av musiker. Fel: ${error.message || error}</p><button onclick="loadView('musicians')">Tillbaka</button></div>`;
+        }
+      }
+
+      async function displayEditMusicianForm(data) { // Gjorde async
+        // console.log("displayEditMusicianForm CALLED with data:", data);
+        // showLoading(false); // Hanteras av callAppsScript
+        const musiciansContainer = document.getElementById('musiciansViewContainer');
+        if (!musiciansContainer) { console.error("displayEditMusicianForm: musiciansViewContainer not found!"); return; }
+        if (!data || data.error) { showMessage(data ? data.error : "Kunde inte ladda musikerdata.", "error"); musiciansContainer.innerHTML = `<div class="form-container"><p>Fel.</p><button onclick="loadView('musicians')">Tillbaka</button></div>`; return; }
+        let formHtml = `<h2>Redigera: ${data.firstName||''} ${data.lastName||''}</h2><div class="form-container"><input type="hidden" id="musicianFormMusicianId" value="${data.musicianId||''}"><label for="musicianFirstName">Förnamn:</label><input type="text" id="musicianFirstName" value="${data.firstName||''}"><label for="musicianLastName">Efternamn:</label><input type="text" id="musicianLastName" value="${data.lastName||''}"><label for="musicianEmail">E-post:</label><input type="email" id="musicianEmail" value="${data.email||''}"><label for="musicianPhone">Telefon:</label><input type="tel" id="musicianPhone" value="${data.phone||''}"><label for="musicianPrimaryInstrument">Primärt Instrument:</label><select id="musicianPrimaryInstrument"><option value="">Laddar...</option></select><label for="musicianHasOwnAccomodation">Eget Boende:</label><select id="musicianHasOwnAccomodation"><option value="NO" ${data.hasOwnAccomodation==='NO'?'selected':''}>Nej</option><option value="YES" ${data.hasOwnAccomodation==='YES'?'selected':''}>Ja</option></select><label for="musicianNotes">Anteckningar:</label><textarea id="musicianNotes">${data.notes||''}</textarea><label for="musicianStatus">Status:</label><select id="musicianStatus"><option value="Active" ${data.status==='Active'?'selected':''}>Aktiv</option><option value="Inactive" ${data.status==='Inactive'?'selected':''}>Inaktiv</option><option value="DoNotContact" ${data.status==='DoNotContact'?'selected':''}>Kontakta Ej</option></select><div class="qualifications-section"><h3>Bef. Kvalifikationer</h3><ul id="musicianExistingQualificationsList" class="existing-qualifications-list">${(data.qualifications&&data.qualifications.length>0)?data.qualifications.map(q=>`<li>${q.instrumentName||'Okänt'}-${q.specificRoleName||'Okänd'}</li>`).join(''):'<li>Inga.</li>'}</ul></div><div class="form-buttons"><button id="updateMusicianButton" onclick="submitUpdateMusician()">Spara Ändringar</button><button onclick="loadView('musicians')">Avbryt</button></div></div>`;
+        musiciansContainer.innerHTML = formHtml;
+        showLoading(true);
+        try {
+            await populateAndSelectInstrumentsDropdown('musicianPrimaryInstrument', data.primaryInstrumentId);
+        } finally {
+            showLoading(false);
+        }
+      }
+
+      async function submitUpdateMusician() {
+        // console.log("submitUpdateMusician CALLED");
+        const musicianId = document.getElementById('musicianFormMusicianId').value;
+        if(!musicianId){showMessage("ID saknas.", "error"); return;}
+        const data = {
+          musicianId:musicianId,
+          firstName:document.getElementById('musicianFirstName').value.trim(),
+          lastName:document.getElementById('musicianLastName').value.trim(),
+          email:document.getElementById('musicianEmail').value.trim(),
+          phone:document.getElementById('musicianPhone').value.trim(),
+          primaryInstrumentId:document.getElementById('musicianPrimaryInstrument').value,
+          hasOwnAccomodation:document.getElementById('musicianHasOwnAccomodation').value,
+          notes:document.getElementById('musicianNotes').value.trim(),
+          status:document.getElementById('musicianStatus').value
+        };
+        // console.log("Updating musician data:", data);
+        try {
+            const response = await callAppsScript('updateExistingMusician', data, 'POST');
+            onMusicianUpdated(response.data || response);
+        } catch (error) {
+            // onFailure hanteras av callAppsScript
+        }
+      }
+
+      function onMusicianUpdated(response) {
+        // console.log("onMusicianUpdated CALLED with:", response);
+        // showLoading(false); // Hanteras av callAppsScript
+        const data = response.data || response;
+
+        if (data && data.success) { showMessage(data.message || `Musiker uppdaterad!`, 'success'); loadView('musicians'); }
+        else { showMessage('Kunde inte uppdatera musiker: '+(data?data.error:'Okänt fel'), 'error');}
+      }
+
+      // --- SLUT PÅ MUSIKERHANTERING ---
+
+      function onFailure(error) { // error är nu ett standard Error-objekt från fetch
+        console.error("onFailure CALLED with error object:", error);
+        // showLoading(false); // Hanteras redan i catch-blocket i callAppsScript
+        let displayMessage = 'Ett fel uppstod: ';
+        if (error && error.message) {
+            displayMessage += error.message;
+        } else if (typeof error === 'object' && error !== null) {
+            displayMessage += JSON.stringify(error);
+        } else {
+            displayMessage += String(error);
+        }
+        showMessage(displayMessage, 'error');
+      }
+
+      window.onload = function() {
+        console.log("window.onload CALLED");
+        loadView('dashboard');
+      };
+
+      console.log("index.html script block FINISHED parsing");
+    </script>
+  </body>
+</html>
