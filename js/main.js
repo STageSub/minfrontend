@@ -772,3 +772,4 @@ document.addEventListener('DOMContentLoaded', () => {
     setupGlobalEventListeners(); // eventHandlers.js
     loadView('dashboard'); // Load initial view
 });
+
