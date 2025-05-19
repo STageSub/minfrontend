@@ -1,13 +1,12 @@
 // js/api.js
-const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyfKb_0dwpmcAuU5-UyxuODN7TqCvDori2QlZuwII-K5X65_Df7j151NASsuXv2y4kpyA/exec"; // BEKRÄFTA ATT DETTA ÄR DIN SENASTE WEB APP URL
+const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyfKb_0dwpmcAuU5-UyxuODN7TqCvDori2QlZuwII-K5X65_Df7j151NASsuXv2y4kpyA/exec";
 
 async function callAppsScript(action, payload = null, method = 'GET') {
     let url = WEB_APP_URL;
     const options = {
         method: method,
-        headers: {}, // Headers sätts nedan
+        headers: {},
         redirect: 'follow'
-        // mode: 'cors' // Brukar inte behövas, fetch hanterar det
     };
 
     if (method === 'GET') {
@@ -20,24 +19,22 @@ async function callAppsScript(action, payload = null, method = 'GET') {
                 }
             }
         }
-        if (params.toString().length > `action=${action}`.length || (params.toString().length > 0 && !params.has('action'))) { // Undvik dubbel action om payload är tom
-             url += `?${params.toString()}`;
-        } else {
-             url += `?action=${action}`; // Fallback om params är tomma förutom action
-        }
+        // Använd en enklare URL-konstruktion för GET
+        url += `?${params.toString()}`;
 
     } else if (method === 'POST') {
-        // Använd text/plain för att skicka JSON-sträng, mer robust med Apps Script e.postData.contents
+        // Denna del är korrekt för att *förbereda* POST-anropet
         options.headers['Content-Type'] = 'text/plain;charset=utf-8';
         options.body = JSON.stringify({ action: action, payload: payload });
     }
-
-    console.log(`Calling Apps Script. Method: ${method}, URL: ${url.split('?')[0]}, Action: ${action}, Payload:`, payload);
+    
+    // Flytta console.log hit så den alltid körs innan fetch
+    console.log(`Calling Apps Script. Method: ${method}, Action: ${action}, Full URL (for GET): ${method === 'GET' ? url : WEB_APP_URL}, Payload (for POST):`, method === 'POST' ? payload : '(GET request)');
 
     try {
-        const response = await fetch(url, options);
+        const response = await fetch(url, options); // 'url' är nu korrekt för både GET och POST
+                                                  // För POST innehåller 'url' bara WEB_APP_URL utan parametrar, vilket är rätt.
 
-        // Försök alltid läsa texten först, sedan parsa om det är JSON
         const responseText = await response.text();
         console.log(`Response text from Apps Script (Action: ${action}, Status: ${response.status}):`, responseText);
 
@@ -59,11 +56,14 @@ async function callAppsScript(action, payload = null, method = 'GET') {
             throw new Error(errorMsg);
         }
 
-        if (!responseText) { // Om svaret är helt tomt
+        if (!responseText) {
             console.warn(`Empty response from Apps Script for action '${action}'. Assuming success with no data.`);
             return (method === 'GET' && (action.toLowerCase().includes('list') || action.toLowerCase().includes('dropdown'))) ? [] : {};
         }
 
+        // ===============================================================
+        // 'result' definieras HÄR, tillgängligt för resten av try-blocket
+        // ===============================================================
         const result = JSON.parse(responseText);
         console.log("Parsed JSON result from Apps Script:", result);
 
@@ -74,21 +74,32 @@ async function callAppsScript(action, payload = null, method = 'GET') {
             }
             return result;
         } else if (method === 'POST') {
-            if (result.success === false) {
-                console.error('Apps Script POST Error:', result.error, result.stack); // result.stack kanske inte finns
-                throw new Error(result.error || 'An unknown error occurred in Apps Script (POST).');
+            // Nu väljer vi hur vi hanterar POST-svaret.
+            // Alternativ 1 (rekommenderat baserat på din Apps Script-retur):
+            // Antag att om 'result' har en 'error'-egenskap, är det ett applikationsfel.
+            // Annars är hela 'result' den data vi vill ha.
+            if (result.error) {
+                console.error('Apps Script POST Error (Application Level):', result.error);
+                throw new Error(result.error);
             }
-            return result.data; // Förväntar oss { success: true, data: ... }
+            return result; // Returnera hela 'result'-objektet direkt
+
+            // Alternativ 2 (om din backend ALLTID returnerade { success: true, data: ... }):
+            // if (result.success === false) {
+            //     console.error('Apps Script POST Error:', result.error, result.stack);
+            //     throw new Error(result.error || 'An unknown error occurred in Apps Script (POST).');
+            // }
+            // return result.data;
         }
 
     } catch (error) {
-        // Om error redan är ett Error-objekt (t.ex. från JSON.parse fail eller throw new Error ovan)
-        // eller om fetch självt misslyckas (nätverksfel etc.)
         const errorMessage = error.message || 'Load failed or network error';
-        console.error(`Error in callAppsScript (action: ${action}):`, errorMessage, error);
-        throw new Error(errorMessage); // Kasta vidare ett Error-objekt
+        console.error(`Error in callAppsScript (action: ${action}):`, errorMessage, error.stack); // Lade till error.stack
+        throw new Error(errorMessage);
     }
 }
+
+// ... (resten av din api.js är oförändrad) ...
 
 // --- PROJEKT API ---
 function apiGetProjectsForList() {
