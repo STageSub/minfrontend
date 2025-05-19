@@ -1,5 +1,5 @@
 // js/api.js
-const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyfKb_0dwpmcAuU5-UyxuODN7TqCvDori2QlZuwII-K5X65_Df7j151NASsuXv2y4kpyA/exec"; // BEKRÄFTA ATT DETTA ÄR DIN SENASTE WEB APP URL
+const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx3uGWV-3SkkzS_H7fY4sDkb11cf9nrq3hK0-PrGfsixLEnX5RL6JMbyzTjSaZUD4zD/exec"; // BEKRÄFTA ATT DETTA ÄR DIN SENASTE WEB APP URL
 
 async function callAppsScript(action, payload = null, method = 'GET') {
     let url = WEB_APP_URL;
