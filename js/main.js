@@ -398,11 +398,11 @@ function toggleMaxParallelForFCFS(containerId, selectId) {
 }
 
 async function handleSubmitNewNeed(projectID) {
-    const form = document.getElementById('createNeedFormContainer');
-    if (!validateNeedForm(form)) return;
+    const form = document.getElementById('createNeedFormContainer'); // Se till att detta är rätt ID för din "Skapa Behov"-form
+    if (!validateNeedForm(form)) return; // Din befintliga validering för obligatoriska fält etc.
 
-    const needData = {
-        ProjectID: projectID,
+    const needData = { // Samla in data från formuläret
+        ProjectID: projectID, // Kommer från parametern
         InstrumentID: form.querySelector('#needForm_Instrument').value,
         InstrumentQualificationID: form.querySelector('#needForm_Qualification').value,
         RankingListID: form.querySelector('#needForm_RankingList').value,
@@ -410,16 +410,23 @@ async function handleSubmitNewNeed(projectID) {
         DispatchType: form.querySelector('#needForm_DispatchType').value,
         MaxParallelDispatches: form.querySelector('#needForm_DispatchType').value === 'FCFS' ? form.querySelector('#needForm_MaxParallelDispatches').value : null,
         RequiresOwnAccomodation: form.querySelector('#needForm_RequiresAccomodation').value,
-        NeedStatus: form.querySelector('#needForm_Status').value,
+        NeedStatus: form.querySelector('#needForm_Status').value, // Se till att du har detta fält i formen
         Notes: form.querySelector('#needForm_Notes').value
     };
 
     showLoading(true);
     try {
-        const response = await apiCreateNewNeed(needData); // api.js
-        showMessage(`Behov (ID: ${response.NeedID}) har sparats för projekt ${response.ProjectID || projectID}!`, 'success');
-        loadView('projectDetails', response.ProjectID || projectID);
+        // apiCreateNewNeed anropar callAppsScript som hanterar {success: true/false, data/error}
+        const responseData = await apiCreateNewNeed(needData); // responseData är `data`-delen från ett lyckat anrop
+
+        // Om vi når hit var anropet lyckat (inget fel kastades av apiCreateNewNeed)
+        showMessage(`Behov (ID: ${responseData.NeedID}) har sparats för projekt ${responseData.ProjectID || projectID}!`, 'success');
+        loadView('projectDetails', responseData.ProjectID || projectID);
+
     } catch (error) {
+        // Fel som kastas av apiCreateNewNeed (t.ex. från backend-valideringen eller andra serverfel)
+        // `error.message` bör nu innehålla det specifika felmeddelandet från backend.
+        console.error("handleSubmitNewNeed - Error caught:", error);
         showMessage(`Kunde inte spara behov: ${error.message}`, "error");
     } finally {
         showLoading(false);
@@ -480,23 +487,68 @@ function validateNeedForm(formElement) {
     return true;
 }
 
+// I main.js
 async function handleDeleteNeed(needID, projectID) {
-    if (!needID) {
-        showMessage("Inget behovs-ID angivet för radering.", "error");
+    console.log("handleDeleteNeed attempting to delete. Received needID:", needID, "(Type:", typeof needID + ") for projectID:", projectID);
+
+    if (!needID || typeof needID === 'object') {
+        showMessage("Ogiltigt ID för radering av behov. Internt fel.", "error");
+        console.error("handleDeleteNeed: Invalid needID detected before API call. Value:", needID);
         return;
     }
+    if (!projectID) {
+        // Detta är mindre kritiskt för själva raderingen, men viktigt för navigering efteråt.
+        console.warn("handleDeleteNeed: projectID is missing or undefined. Navigation after delete might be affected.");
+    }
+
     const confirmation = confirm(`Är du säker på att du vill radera Behov ID: ${needID}? Detta kan inte ångras och tar även bort alla relaterade svar.`);
     if (confirmation) {
         showLoading(true);
         try {
-            const response = await apiDeleteNeed(needID); // Assuming response.data from api.js contains { deletedNeedID: "...", projectID: "..." }
-            showMessage(`Behov (ID: ${response.deletedNeedID || needID}) har raderats!`, 'success');
-            loadView('projectDetails', response.projectID || projectID); // Reload project details to reflect change
+            // apiDeleteNeed skickar { needID: "sträng-id" } som payload i POST-anropet.
+            // `response` här är `result.data` från `callAppsScript` i `api.js`.
+            // Vi förväntar oss att `response` från en lyckad `apiDeleteNeed`
+            // innehåller minst `deletedNeedID` och helst `projectID` från backend.
+            const response = await apiDeleteNeed(needID); // apiDeleteNeed tar emot en sträng
+
+            // Logga svaret från backend för att se vad vi faktiskt får
+            console.log("handleDeleteNeed - Response from apiDeleteNeed:", response);
+
+            if (response && response.deletedNeedID) {
+                 showMessage(`Behov (ID: ${response.deletedNeedID}) har raderats!`, 'success');
+                 // Använd projekt-ID från svaret om det finns, annars det vi skickade med,
+                 // eller currentProjectID som en sista utväg.
+                 const navigateToProjectID = response.projectID || projectID || currentProjectID;
+                 if (navigateToProjectID) {
+                    loadView('projectDetails', navigateToProjectID);
+                 } else {
+                    console.warn("handleDeleteNeed: Could not determine projectID to navigate to. Going to projects list.");
+                    loadView('projects');
+                    showMessage('Navigerar till projektlistan då aktuellt projekt-ID är okänt.', 'info');
+                 }
+            } else if (response && response.error) { // Om backend returnerar ett specifikt fel i data-delen
+                 showMessage(`Kunde inte radera behov: ${response.error}`, "error");
+            }
+             else {
+                // Om backend-svaret är oväntat men inget direkt fel har kastats av api.js
+                showMessage(`Radering av behov för ID ${needID} kan ha utförts, men oväntat svar från servern. Uppdaterar vyn.`, 'info');
+                const navigateToProjectID = projectID || currentProjectID;
+                 if (navigateToProjectID) {
+                    loadView('projectDetails', navigateToProjectID);
+                 } else {
+                    loadView('projects');
+                 }
+            }
         } catch (error) {
-            showMessage(`Kunde inte radera behov: ${error.message}`, "error");
+            // Fel som kastas av apiDeleteNeed (via callAppsScript) eller nätverksfel
+            // onFailure i uiUtils.js bör redan ha visat ett meddelande via showMessage.
+            console.error("handleDeleteNeed - Error caught:", error);
+            // showMessage(`Kunde inte radera behov: ${error.message}`, "error"); // Kan vara redundant om onFailure redan körts
         } finally {
             showLoading(false);
         }
+    } else {
+        console.log("Radera behov avbröts av användaren.");
     }
 }
 
